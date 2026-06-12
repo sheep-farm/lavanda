@@ -1,0 +1,36 @@
+# Maintainer: Flavio de Vasconcellos <flavio.de.vasconcellos@gmail.com>
+pkgname=lavanda-bin
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Native Wayland music player for Omarchy/Hyprland with live theming and MPRIS2"
+arch=('x86_64')
+url="https://github.com/sheep-farm/lavanda"
+license=('MIT')
+depends=(
+    'alsa-lib'
+    'dbus'
+)
+optdepends=(
+    'pipewire-alsa: PipeWire audio support'
+    'pulseaudio-alsa: PulseAudio audio support'
+    'libnotify: track change notifications (notify-send)'
+    'ttf-jetbrains-mono-nerd: recommended Nerd Font'
+)
+conflicts=('lavanda')
+provides=('lavanda')
+source=(
+    "lavanda-$pkgver-x86_64-linux.tar.gz::https://github.com/sheep-farm/lavanda/releases/download/v$pkgver/lavanda-$pkgver-x86_64-linux.tar.gz"
+    "lavanda.desktop::https://raw.githubusercontent.com/sheep-farm/lavanda/v$pkgver/assets/lavanda.desktop"
+    "LICENSE::https://raw.githubusercontent.com/sheep-farm/lavanda/v$pkgver/LICENSE"
+)
+sha256sums=(
+    '860bd1402eb02cd96d4ea576732bef000c686d3ef791594b248750d31c66a9b4'
+    '2a022becf7cf19460f0ec2a04f483446d0408abd66467f5a719184e8965ab9b1'
+    'eb250b5d739669135e041b6e800ea5b09d4c07103985925430c6f6bb93e96db0'
+)
+
+package() {
+    install -Dm755 lavanda                 "$pkgdir/usr/bin/lavanda"
+    install -Dm644 lavanda.desktop         "$pkgdir/usr/share/applications/lavanda.desktop"
+    install -Dm644 LICENSE                 "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

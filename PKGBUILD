@@ -18,7 +18,7 @@ optdepends=(
 )
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/sheep-farm/lavanda/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('c896acdcfd6bee3d81890a36d3f38f7c53de7f74cd0f6fe72feeb61adc2df384')
+sha256sums=('10584008bdaeb27276c9500803c3ac8a8f24044ca4f83cb6213afdaf16362231')
 
 prepare() {
     cd "$pkgname-$pkgver"
