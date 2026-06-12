@@ -847,11 +847,13 @@ impl AppState {
                     }
                     Key::Named(Named::ArrowRight) => Some(Message::SwitchFocus(Focus::TrackList)),
                     Key::Named(Named::ArrowLeft) => Some(Message::SwitchFocus(Focus::Sidebar)),
+                    Key::Character(ref c) if c.as_str() == "k" && mods.control() => {
+                        Some(Message::ToggleHelp)
+                    }
                     Key::Character(ref c) => match c.as_str() {
                         "i" | "I" => Some(Message::TogglePlayOnClick),
                         "m" | "M" => Some(Message::EditCursorTrack),
                         "/" => Some(Message::SearchToggle),
-                        "?" => Some(Message::ToggleHelp),
                         "n" | "N" => Some(Message::NextTrack),
                         "p" | "P" => Some(Message::PreviousTrack),
                         "s" | "S" => Some(Message::ToggleShuffle),

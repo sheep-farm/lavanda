@@ -189,9 +189,11 @@ These work when the lavanda window is focused.
 
 | Key | Action |
 |---|---|
+| `/` | search / filter tracks |
 | `m` | edit metadata of the track under the cursor |
 | `i` | toggle play-on-click (immediate playback vs. browse mode) |
-| `Escape` | close dialog |
+| `Ctrl+K` | keybinding reference (this table) |
+| `Escape` | close any overlay |
 
 For system-wide controls (lavanda running in background), wire `playerctl` to your compositor:
 

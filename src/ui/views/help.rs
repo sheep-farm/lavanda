@@ -58,10 +58,10 @@ pub fn view(state: &AppState) -> Option<Element<'_, Message>> {
         Space::with_height(12),
         section("General"),
         Space::with_height(6),
-        bind("?", "toggle this help"),
+        bind("Ctrl+K", "toggle this help"),
         bind("Escape", "close overlay"),
         Space::with_height(16),
-        text("Press ? or Escape to close")
+        text("Press Ctrl+K or Escape to close")
             .color(theme::overlay0())
             .size(11),
     ]
