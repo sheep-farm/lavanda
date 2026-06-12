@@ -33,6 +33,7 @@ impl canvas::Program<Message> for SpectrumCanvas {
 
         let n_bars = ((bounds.width / SLOT).floor() as usize).clamp(1, src.len());
         let center_y = bounds.height / 2.0;
+        let x_offset = (bounds.width - n_bars as f32 * SLOT) / 2.0;
 
         for i in 0..n_bars {
             // Evenly resample src into n_bars
@@ -43,7 +44,7 @@ impl canvas::Program<Message> for SpectrumCanvas {
                 continue;
             }
 
-            let x = i as f32 * SLOT + (SLOT - BAR_W) / 2.0;
+            let x = x_offset + i as f32 * SLOT + (SLOT - BAR_W) / 2.0;
             let half_h = amp * center_y * 0.88;
 
             let path = Path::rectangle(

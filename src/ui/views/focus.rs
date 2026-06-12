@@ -42,9 +42,16 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
                     weight: iced::font::Weight::Bold,
                     ..icons::UI_FONT
                 }),
-            text(format!("{} · {}", track.album, track.track_number.map(|n| n.to_string()).unwrap_or_default()))
-                .color(theme::subtext())
-                .size(13),
+            text(format!(
+                "{} · {}",
+                track.album,
+                track
+                    .track_number
+                    .map(|n| n.to_string())
+                    .unwrap_or_default()
+            ))
+            .color(theme::subtext())
+            .size(13),
         ]
         .spacing(4)
         .align_x(Alignment::Center)
@@ -56,17 +63,17 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             .into()
     };
 
-    let center = column![
+    // Flat column: two Fill spacers vertically center the content block;
+    // spectrum sits as the last fixed-height element.
+    let mut layout = column![
         Space::with_height(Length::Fill),
-        container(cover)
-            .center_x(Length::Fill),
+        container(cover).center_x(Length::Fill),
         Space::with_height(24),
-        container(track_info)
-            .center_x(Length::Fill),
+        container(track_info).center_x(Length::Fill),
         Space::with_height(20),
         container(progress::progress_bar(state.position, state.duration))
             .width(Length::Fill)
-            .padding([0, 32]),
+            .padding([0, 96]),
         Space::with_height(12),
         container(controls::playback_controls(
             &state.playback_state,
@@ -80,22 +87,17 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     .width(Length::Fill)
     .height(Length::Fill);
 
-    let bottom = if state.show_spectrum {
-        spectrum::spectrum_view(&state.spectrum, Length::Fill, Length::Fixed(56.0))
-    } else {
-        Space::with_height(0).into()
-    };
+    if state.show_spectrum {
+        layout = layout
+            .push(spectrum::spectrum_view(&state.spectrum, Length::Fill, Length::Fixed(56.0)));
+    }
 
-    container(
-        column![center, bottom]
-            .width(Length::Fill)
-            .height(Length::Fill),
-    )
-    .style(|_: &iced::Theme| iced::widget::container::Style {
-        background: Some(iced::Background::Color(theme::base())),
-        ..Default::default()
-    })
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+    container(layout)
+        .style(|_: &iced::Theme| iced::widget::container::Style {
+            background: Some(iced::Background::Color(theme::base())),
+            ..Default::default()
+        })
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
