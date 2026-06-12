@@ -20,6 +20,9 @@ A native Wayland music player written in Rust, built for [Omarchy](https://omarc
 - **Real seek** — click anywhere on the progress bar to jump
 - **Dynamic volume** — slider takes effect immediately, mid-playback
 - **Shuffle & repeat** — per-session
+- **Keyboard navigation** — arrow keys move the cursor within sidebar and track list; `←`/`→` switch focus between panels; `Enter` activates; full keyboard-first design
+- **Metadata editor** — press `m` on any track to edit title, artist, album and track number; tags written back to the file via lofty
+- **Play-on-click toggle** — press `i` to switch between immediate playback on click/Enter and cursor-only browse mode
 - **Resizable sidebar** — drag the divider; width is persisted across sessions
 - **Session state** — last selected folder and volume are restored on next launch
 - **MPRIS2** — full D-Bus integration; works with `playerctl`, Waybar `mpris` module, AGS, EWW, etc.
@@ -88,11 +91,16 @@ repeat = false
 # Interface language: "auto", "en", "pt_BR", "es"
 language = "auto"
 
-# Seek step in seconds for ← → arrow keys
+# Seek step in seconds for Shift+← / Shift+→
 seek_step = 5
 
 # Volume delta per + / - keypress
 volume_step = 0.05
+
+# Play track immediately when clicking or pressing Enter (true),
+# or just move the cursor without starting playback (false).
+# Toggle at runtime with the i key.
+play_on_click = true
 ```
 
 Session state (last folder, volume) is saved separately at `~/.config/lavanda/state.toml` and restored automatically on next launch.
@@ -157,15 +165,33 @@ Works with all built-in Omarchy themes (Catppuccin, Nord, Gruvbox, Tokyo Night, 
 
 These work when the lavanda window is focused.
 
+### Navigation
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | move cursor within the focused panel |
+| `←` / `→` | switch focus between sidebar and track list |
+| `Enter` | activate item under cursor (select folder / play track) |
+
+### Playback
+
 | Key | Action |
 |---|---|
 | `Space` | play / pause |
-| `→` / `←` | seek forward / backward |
+| `Shift+→` / `Shift+←` | seek forward / backward |
 | `n` / `p` | next / previous track |
 | `s` | toggle shuffle |
 | `r` | toggle repeat |
 | `+` or `=` | volume up |
 | `-` | volume down |
+
+### Library
+
+| Key | Action |
+|---|---|
+| `m` | edit metadata of the track under the cursor |
+| `i` | toggle play-on-click (immediate playback vs. browse mode) |
+| `Escape` | close dialog |
 
 For system-wide controls (lavanda running in background), wire `playerctl` to your compositor:
 
