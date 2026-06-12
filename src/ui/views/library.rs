@@ -1,7 +1,7 @@
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
 use iced::{Alignment, Element, Length};
 
-use crate::app::{AppState, Message};
+use crate::app::{AppState, Focus, Message};
 use crate::ui::theme;
 
 pub fn view(state: &AppState) -> Element<'_, Message> {
@@ -25,12 +25,15 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 }
 
 fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
+    let is_sidebar_focused = state.focus == Focus::Sidebar;
     let items: Element<Message> = column(
         state
             .folders
             .iter()
-            .map(|path| {
+            .enumerate()
+            .map(|(i, path)| {
                 let is_selected = state.selected_folder.as_ref() == Some(path);
+                let is_cursor = is_sidebar_focused && i == state.sidebar_cursor;
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
                 let label = text(name)
@@ -47,7 +50,12 @@ fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
                     .width(Length::Fill)
                     .padding([6, 12]);
 
-                if is_selected {
+                if is_cursor {
+                    container(btn)
+                        .style(theme::cursor_row)
+                        .width(Length::Fill)
+                        .into()
+                } else if is_selected {
                     container(btn)
                         .style(theme::selected_row)
                         .width(Length::Fill)
@@ -97,6 +105,7 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
     }
 
     let current_id = state.current_track.as_ref().map(|t| t.id);
+    let is_tracklist_focused = state.focus == Focus::TrackList;
 
     // Agrupa faixas por álbum mantendo a ordem de inserção
     let mut groups: Vec<(String, Vec<&crate::library::models::Track>)> = Vec::new();
@@ -111,6 +120,7 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
     }
 
     let mut rows: Vec<Element<Message>> = Vec::new();
+    let mut track_idx: usize = 0;
 
     for (album_name, tracks) in groups.into_iter() {
         let n = tracks.len();
@@ -135,6 +145,7 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
 
         for track in tracks.into_iter() {
             let is_current = current_id == Some(track.id);
+            let is_cursor = is_tracklist_focused && track_idx == state.track_cursor;
             let row_color = if is_current {
                 theme::accent()
             } else {
@@ -165,7 +176,11 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
             .align_y(Alignment::Center)
             .padding([5, 12]);
 
-            let styled = if is_current {
+            let styled = if is_cursor {
+                container(track_row)
+                    .style(theme::cursor_row)
+                    .width(Length::Fill)
+            } else if is_current {
                 container(track_row)
                     .style(theme::selected_row)
                     .width(Length::Fill)
@@ -181,6 +196,7 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
                     .padding(0)
                     .into(),
             );
+            track_idx += 1;
         }
 
         rows.push(Space::with_height(8).into());

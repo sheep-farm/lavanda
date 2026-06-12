@@ -261,6 +261,18 @@ pub fn selected_row(_: &iced::Theme) -> container::Style {
     }
 }
 
+pub fn cursor_row(_: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(iced::Background::Color(with_alpha(surface0(), 0.7))),
+        border: Border {
+            color: with_alpha(accent(), 0.6),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
 pub fn player_panel(_: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(mantle())),

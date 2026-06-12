@@ -20,6 +20,12 @@ use crate::ui::{theme, views};
 /// Receptor compartilhado, consumido uma única vez pela subscription.
 type Shared<T> = Arc<Mutex<Option<UnboundedReceiver<T>>>>;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Focus {
+    Sidebar,
+    TrackList,
+}
+
 // ── Mensagens ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -43,6 +49,10 @@ pub enum Message {
     SidebarDragMove(f32),
     SidebarDragEnd,
 
+    MoveCursor(i32),
+    ActivateCursor,
+    SwitchFocus(Focus),
+
     Audio(AudioEvent),
     Mpris(MprisCommand),
     CheckTheme,
@@ -64,6 +74,10 @@ pub struct AppState {
     pub selected_folder: Option<PathBuf>,
     pub tracks: Vec<Track>,
     folder_cache: HashMap<PathBuf, Vec<Track>>,
+
+    pub focus: Focus,
+    pub sidebar_cursor: usize,
+    pub track_cursor: usize,
 
     pub sidebar_width: f32,
     dragging_sidebar: bool,
@@ -123,6 +137,11 @@ impl AppState {
             Task::none()
         };
 
+        let sidebar_cursor = selected_folder
+            .as_ref()
+            .and_then(|p| folders.iter().position(|f| f == p))
+            .unwrap_or(0);
+
         let state = AppState {
             playback_state: PlaybackState::Stopped,
             current_track: None,
@@ -136,6 +155,9 @@ impl AppState {
             selected_folder,
             tracks: Vec::new(),
             folder_cache: HashMap::new(),
+            focus: Focus::Sidebar,
+            sidebar_cursor,
+            track_cursor: 0,
             sidebar_width: load_sidebar_width(),
             dragging_sidebar: false,
             iced_theme,
@@ -177,6 +199,9 @@ impl AppState {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::SelectFolder(path) => {
+                if let Some(idx) = self.folders.iter().position(|f| f == &path) {
+                    self.sidebar_cursor = idx;
+                }
                 self.selected_folder = Some(path.clone());
                 if let Some(cached) = self.folder_cache.get(&path) {
                     self.tracks = cached.clone();
@@ -199,12 +224,16 @@ impl AppState {
                 self.folder_cache.insert(path.clone(), tracks.clone());
                 if self.selected_folder.as_ref() == Some(&path) {
                     self.tracks = tracks;
+                    self.track_cursor = 0;
                 }
                 self.persist_state();
                 Task::none()
             }
 
             Message::PlayTrack(track) => {
+                if let Some(idx) = self.tracks.iter().position(|t| t.id == track.id) {
+                    self.track_cursor = idx;
+                }
                 self.queue = self.tracks.clone();
                 self.start_playback(track)
             }
@@ -308,6 +337,67 @@ impl AppState {
             Message::SidebarDragEnd => {
                 self.dragging_sidebar = false;
                 save_sidebar_width(self.sidebar_width);
+                Task::none()
+            }
+
+            Message::MoveCursor(delta) => {
+                match self.focus {
+                    Focus::Sidebar => {
+                        let len = self.folders.len();
+                        if len > 0 {
+                            self.sidebar_cursor = (self.sidebar_cursor as i32 + delta)
+                                .rem_euclid(len as i32)
+                                as usize;
+                        }
+                    }
+                    Focus::TrackList => {
+                        let len = self.tracks.len();
+                        if len > 0 {
+                            self.track_cursor =
+                                (self.track_cursor as i32 + delta).rem_euclid(len as i32) as usize;
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::ActivateCursor => match self.focus {
+                Focus::Sidebar => {
+                    if let Some(path) = self.folders.get(self.sidebar_cursor).cloned() {
+                        self.update(Message::SelectFolder(path))
+                    } else {
+                        Task::none()
+                    }
+                }
+                Focus::TrackList => {
+                    if let Some(track) = self.tracks.get(self.track_cursor).cloned() {
+                        self.queue = self.tracks.clone();
+                        self.start_playback(track)
+                    } else {
+                        Task::none()
+                    }
+                }
+            },
+
+            Message::SwitchFocus(focus) => {
+                // Sync cursor to the current active item when switching.
+                match focus {
+                    Focus::Sidebar => {
+                        if let Some(ref sf) = self.selected_folder.clone() {
+                            if let Some(idx) = self.folders.iter().position(|f| f == sf) {
+                                self.sidebar_cursor = idx;
+                            }
+                        }
+                    }
+                    Focus::TrackList => {
+                        if let Some(ref ct) = self.current_track.clone() {
+                            if let Some(idx) = self.tracks.iter().position(|t| t.id == ct.id) {
+                                self.track_cursor = idx;
+                            }
+                        }
+                    }
+                }
+                self.focus = focus;
                 Task::none()
             }
 
@@ -441,13 +531,22 @@ impl AppState {
                 channel_stream(self.mpris_cmds.clone(), Message::Mpris),
             ),
             iced::time::every(Duration::from_secs(3)).map(|_| Message::CheckTheme),
-            iced::keyboard::on_key_press(|key, _mods| {
+            iced::keyboard::on_key_press(|key, mods| {
                 use iced::keyboard::key::Named;
                 use iced::keyboard::Key;
                 let seek = crate::config::get().seek_step as i64;
                 let vol = crate::config::get().volume_step;
                 match key {
                     Key::Named(Named::Space) => Some(Message::PlayPause),
+                    Key::Named(Named::ArrowUp) => Some(Message::MoveCursor(-1)),
+                    Key::Named(Named::ArrowDown) => Some(Message::MoveCursor(1)),
+                    Key::Named(Named::Enter) => Some(Message::ActivateCursor),
+                    Key::Named(Named::ArrowRight) if mods.shift() => {
+                        Some(Message::SwitchFocus(Focus::TrackList))
+                    }
+                    Key::Named(Named::ArrowLeft) if mods.shift() => {
+                        Some(Message::SwitchFocus(Focus::Sidebar))
+                    }
                     Key::Named(Named::ArrowRight) => Some(Message::SeekRelative(seek)),
                     Key::Named(Named::ArrowLeft) => Some(Message::SeekRelative(-seek)),
                     Key::Character(ref c) => match c.as_str() {
