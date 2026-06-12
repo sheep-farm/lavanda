@@ -542,13 +542,13 @@ impl AppState {
                     Key::Named(Named::ArrowDown) => Some(Message::MoveCursor(1)),
                     Key::Named(Named::Enter) => Some(Message::ActivateCursor),
                     Key::Named(Named::ArrowRight) if mods.shift() => {
-                        Some(Message::SwitchFocus(Focus::TrackList))
+                        Some(Message::SeekRelative(seek))
                     }
                     Key::Named(Named::ArrowLeft) if mods.shift() => {
-                        Some(Message::SwitchFocus(Focus::Sidebar))
+                        Some(Message::SeekRelative(-seek))
                     }
-                    Key::Named(Named::ArrowRight) => Some(Message::SeekRelative(seek)),
-                    Key::Named(Named::ArrowLeft) => Some(Message::SeekRelative(-seek)),
+                    Key::Named(Named::ArrowRight) => Some(Message::SwitchFocus(Focus::TrackList)),
+                    Key::Named(Named::ArrowLeft) => Some(Message::SwitchFocus(Focus::Sidebar)),
                     Key::Character(ref c) => match c.as_str() {
                         "n" | "N" => Some(Message::NextTrack),
                         "p" | "P" => Some(Message::PreviousTrack),
