@@ -194,15 +194,12 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
                 container(track_row).width(Length::Fill)
             };
 
-            let track_btn = button(styled)
-                .on_press(Message::PlayTrack(track.clone()))
-                .style(iced::widget::button::text)
-                .width(Length::Fill)
-                .padding(0);
-
             rows.push(
-                mouse_area(track_btn)
-                    .on_right_press(Message::OpenEditDialog(track.clone()))
+                button(styled)
+                    .on_press(Message::PlayTrack(track.clone()))
+                    .style(iced::widget::button::text)
+                    .width(Length::Fill)
+                    .padding(0)
                     .into(),
             );
             track_idx += 1;

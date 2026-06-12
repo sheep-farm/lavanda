@@ -89,7 +89,7 @@ pub enum Message {
     ActivateCursor,
     SwitchFocus(Focus),
 
-    OpenEditDialog(Track),
+    EditCursorTrack,
     EditField(EditField, String),
     SaveMetadata,
     MetadataSaved(Result<Track, String>),
@@ -465,8 +465,12 @@ impl AppState {
                 Task::none()
             }
 
-            Message::OpenEditDialog(track) => {
-                self.edit_state = Some(EditState::from_track(&track));
+            Message::EditCursorTrack => {
+                if self.focus == Focus::TrackList {
+                    if let Some(track) = self.tracks.get(self.track_cursor) {
+                        self.edit_state = Some(EditState::from_track(track));
+                    }
+                }
                 Task::none()
             }
 
@@ -700,6 +704,7 @@ impl AppState {
                     Key::Named(Named::ArrowRight) => Some(Message::SwitchFocus(Focus::TrackList)),
                     Key::Named(Named::ArrowLeft) => Some(Message::SwitchFocus(Focus::Sidebar)),
                     Key::Character(ref c) => match c.as_str() {
+                        "m" | "M" => Some(Message::EditCursorTrack),
                         "n" | "N" => Some(Message::NextTrack),
                         "p" | "P" => Some(Message::PreviousTrack),
                         "s" | "S" => Some(Message::ToggleShuffle),
