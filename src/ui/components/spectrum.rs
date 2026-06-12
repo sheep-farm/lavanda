@@ -22,25 +22,33 @@ impl canvas::Program<Message> for SpectrumCanvas {
     ) -> Vec<Geometry<iced::Renderer>> {
         let mut frame = Frame::new(renderer, bounds.size());
 
-        let n = self.bins.len();
-        if n == 0 {
+        let src = &self.bins;
+        if src.is_empty() {
             return vec![frame.into_geometry()];
         }
 
-        let slot = bounds.width / n as f32;
-        let bar_w = (slot * 0.25).clamp(1.0, 2.0);
+        const BAR_W: f32 = 1.5;
+        const GAP: f32 = 3.0;
+        const SLOT: f32 = BAR_W + GAP;
+
+        let n_bars = ((bounds.width / SLOT).floor() as usize).clamp(1, src.len());
         let center_y = bounds.height / 2.0;
 
-        for (i, &amp) in self.bins.iter().enumerate() {
+        for i in 0..n_bars {
+            // Evenly resample src into n_bars
+            let src_idx = i * src.len() / n_bars;
+            let amp = src[src_idx];
+
             if amp < 0.005 {
                 continue;
             }
-            let x = i as f32 * slot + (slot - bar_w) / 2.0;
+
+            let x = i as f32 * SLOT + (SLOT - BAR_W) / 2.0;
             let half_h = amp * center_y * 0.88;
 
             let path = Path::rectangle(
                 Point::new(x, center_y - half_h),
-                Size::new(bar_w, half_h * 2.0),
+                Size::new(BAR_W, half_h * 2.0),
             );
             frame.fill(&path, self.accent);
         }

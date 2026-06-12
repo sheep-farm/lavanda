@@ -7,7 +7,7 @@ use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use tokio::sync::mpsc::UnboundedSender;
 
-pub const NUM_BARS: usize = 48;
+pub const NUM_BARS: usize = 128;
 const FFT_SIZE: usize = 2048;
 const SAMPLE_RATE: f32 = 48000.0;
 
