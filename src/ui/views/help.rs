@@ -56,6 +56,7 @@ pub fn view(state: &AppState) -> Option<Element<'_, Message>> {
         bind("m", "edit track metadata"),
         bind("i", "toggle play-on-click"),
         bind("v", "toggle spectrum visualizer"),
+        bind("f", "toggle focus layout"),
         Space::with_height(12),
         section("General"),
         Space::with_height(6),

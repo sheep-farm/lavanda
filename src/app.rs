@@ -26,6 +26,12 @@ pub enum Focus {
     TrackList,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Layout {
+    Standard,
+    Focus,
+}
+
 // ── Mensagens ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -102,6 +108,7 @@ pub enum Message {
     SearchInput(String),
     ToggleHelp,
     ToggleSpectrum,
+    ToggleLayout,
 
     SpectrumData(Vec<f32>),
 
@@ -148,6 +155,7 @@ pub struct AppState {
 
     pub spectrum: Vec<f32>,
     pub show_spectrum: bool,
+    pub layout: Layout,
 
     audio: AudioPlayer,
     audio_events: Shared<AudioEvent>,
@@ -236,6 +244,7 @@ impl AppState {
             help_visible: false,
             spectrum: vec![0.0; crate::audio::spectrum::NUM_BARS],
             show_spectrum: true,
+            layout: Layout::Standard,
             audio,
             audio_events,
             spectrum_rx,
@@ -307,6 +316,7 @@ impl AppState {
                     | Message::FocusPrev
                     | Message::SpectrumData(_)
                     | Message::ToggleSpectrum
+                    | Message::ToggleLayout
             )
         {
             return Task::none();
@@ -334,6 +344,7 @@ impl AppState {
                     | Message::FocusPrev
                     | Message::SpectrumData(_)
                     | Message::ToggleSpectrum
+                    | Message::ToggleLayout
             )
         {
             return Task::none();
@@ -710,6 +721,14 @@ impl AppState {
                 Task::none()
             }
 
+            Message::ToggleLayout => {
+                self.layout = match self.layout {
+                    Layout::Standard => Layout::Focus,
+                    Layout::Focus => Layout::Standard,
+                };
+                Task::none()
+            }
+
             Message::FocusNext => iced::widget::focus_next(),
             Message::FocusPrev => iced::widget::focus_previous(),
 
@@ -814,27 +833,36 @@ impl AppState {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let mut main = column![
-            self.header_view(),
-            views::player::view(self),
-            views::library::view(self),
-        ]
-        .spacing(0)
-        .width(Length::Fill)
-        .height(Length::Fill);
+        let base: Element<Message> = match self.layout {
+            Layout::Focus => column![self.header_view(), views::focus::view(self)]
+                .spacing(0)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+            Layout::Standard => {
+                let mut main = column![
+                    self.header_view(),
+                    views::player::view(self),
+                    views::library::view(self),
+                ]
+                .spacing(0)
+                .width(Length::Fill)
+                .height(Length::Fill);
 
-        if let Some(ref msg) = self.status {
-            main = main.push(status_bar_view(msg));
-        }
+                if let Some(ref msg) = self.status {
+                    main = main.push(status_bar_view(msg));
+                }
 
-        let base: Element<Message> = container(main)
-            .style(|_: &Theme| iced::widget::container::Style {
-                background: Some(iced::Background::Color(theme::base())),
-                ..Default::default()
-            })
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+                container(main)
+                    .style(|_: &Theme| iced::widget::container::Style {
+                        background: Some(iced::Background::Color(theme::base())),
+                        ..Default::default()
+                    })
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            }
+        };
 
         if let Some(overlay) = views::help::view(self) {
             iced::widget::stack![base, overlay].into()
@@ -888,6 +916,7 @@ impl AppState {
                         "i" | "I" => Some(Message::TogglePlayOnClick),
                         "m" | "M" => Some(Message::EditCursorTrack),
                         "v" | "V" => Some(Message::ToggleSpectrum),
+                        "f" | "F" => Some(Message::ToggleLayout),
                         "/" => Some(Message::SearchToggle),
                         "n" | "N" => Some(Message::NextTrack),
                         "p" | "P" => Some(Message::PreviousTrack),

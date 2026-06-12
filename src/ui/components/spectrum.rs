@@ -57,12 +57,12 @@ impl canvas::Program<Message> for SpectrumCanvas {
     }
 }
 
-pub fn spectrum_view(bins: &[f32]) -> Element<'_, Message> {
+pub fn spectrum_view(bins: &[f32], width: Length, height: Length) -> Element<'_, Message> {
     Canvas::new(SpectrumCanvas {
         bins: bins.to_vec(),
         accent: theme::accent(),
     })
-    .width(Length::FillPortion(3))
-    .height(Length::Fixed(180.0))
+    .width(width)
+    .height(height)
     .into()
 }

@@ -83,7 +83,11 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         player_row = player_row
             .push(info_col.width(Length::FillPortion(5)))
             .push(Space::with_width(16))
-            .push(spectrum::spectrum_view(&state.spectrum));
+            .push(spectrum::spectrum_view(
+                &state.spectrum,
+                Length::FillPortion(3),
+                Length::Fixed(180.0),
+            ));
     } else {
         player_row = player_row.push(info_col.width(Length::Fill));
     }
