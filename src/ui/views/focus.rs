@@ -13,8 +13,8 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     {
         let handle = image::Handle::from_bytes(data.clone());
         image(handle)
-            .width(320)
-            .height(320)
+            .width(160)
+            .height(160)
             .content_fit(iced::ContentFit::Cover)
             .into()
     } else {
@@ -22,10 +22,10 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             text(icons::ICON_MUSIC)
                 .font(icons::NERD_FONT_MONO)
                 .color(theme::overlay0())
-                .size(80),
+                .size(48),
         )
-        .width(320)
-        .height(320)
+        .width(160)
+        .height(160)
         .align_x(iced::alignment::Horizontal::Center)
         .align_y(iced::alignment::Vertical::Center)
         .style(theme::card)
