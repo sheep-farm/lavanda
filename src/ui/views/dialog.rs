@@ -4,18 +4,24 @@ use iced::{Alignment, Element, Length};
 use crate::app::{AppState, EditField, Message};
 use crate::ui::theme;
 
+pub const TITLE_INPUT_ID: &str = "edit_title";
+
 pub fn view(state: &AppState) -> Option<Element<'_, Message>> {
     let es = state.edit_state.as_ref()?;
 
-    let field = |label: &'static str, value: &str, field: EditField| {
+    let field = |label: &'static str, value: &str, id: Option<&'static str>, ef: EditField| {
+        let mut input = text_input("", value)
+            .on_input(move |v| Message::EditField(ef.clone(), v))
+            .style(theme::dialog_input)
+            .size(13)
+            .padding([6, 8])
+            .width(Length::Fill);
+        if let Some(id) = id {
+            input = input.id(text_input::Id::new(id));
+        }
         row![
             text(label).color(theme::subtext()).size(13).width(90),
-            text_input("", value)
-                .on_input(move |v| Message::EditField(field.clone(), v))
-                .style(theme::dialog_input)
-                .size(13)
-                .padding([6, 8])
-                .width(Length::Fill),
+            input,
         ]
         .spacing(8)
         .align_y(Alignment::Center)
@@ -43,13 +49,13 @@ pub fn view(state: &AppState) -> Option<Element<'_, Message>> {
             .font(crate::ui::icons::UI_FONT_BOLD)
             .color(theme::text()),
         Space::with_height(20),
-        field("Title", &es.title, EditField::Title),
+        field("Title", &es.title, Some(TITLE_INPUT_ID), EditField::Title),
         Space::with_height(10),
-        field("Artist", &es.artist, EditField::Artist),
+        field("Artist", &es.artist, None, EditField::Artist),
         Space::with_height(10),
-        field("Album", &es.album, EditField::Album),
+        field("Album", &es.album, None, EditField::Album),
         Space::with_height(10),
-        field("Track #", &es.track_number, EditField::TrackNumber),
+        field("Track #", &es.track_number, None, EditField::TrackNumber),
         Space::with_height(16),
     ]
     .spacing(0);

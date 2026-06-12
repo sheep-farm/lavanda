@@ -91,6 +91,8 @@ pub enum Message {
 
     EditCursorTrack,
     EditField(EditField, String),
+    FocusNext,
+    FocusPrev,
     SaveMetadata,
     MetadataSaved(Result<Track, String>),
     CancelEdit,
@@ -257,6 +259,9 @@ impl AppState {
                     | Message::SidebarDragMove(_)
                     | Message::SidebarDragEnd
                     | Message::VolumeChanged(_)
+                    | Message::ActivateCursor
+                    | Message::FocusNext
+                    | Message::FocusPrev
             )
         {
             return Task::none();
@@ -425,23 +430,28 @@ impl AppState {
                 Task::none()
             }
 
-            Message::ActivateCursor => match self.focus {
-                Focus::Sidebar => {
-                    if let Some(path) = self.folders.get(self.sidebar_cursor).cloned() {
-                        self.update(Message::SelectFolder(path))
-                    } else {
-                        Task::none()
-                    }
+            Message::ActivateCursor => {
+                if self.edit_state.is_some() {
+                    return Task::done(Message::SaveMetadata);
                 }
-                Focus::TrackList => {
-                    if let Some(track) = self.tracks.get(self.track_cursor).cloned() {
-                        self.queue = self.tracks.clone();
-                        self.start_playback(track)
-                    } else {
-                        Task::none()
+                return match self.focus {
+                    Focus::Sidebar => {
+                        if let Some(path) = self.folders.get(self.sidebar_cursor).cloned() {
+                            self.update(Message::SelectFolder(path))
+                        } else {
+                            Task::none()
+                        }
                     }
-                }
-            },
+                    Focus::TrackList => {
+                        if let Some(track) = self.tracks.get(self.track_cursor).cloned() {
+                            self.queue = self.tracks.clone();
+                            self.start_playback(track)
+                        } else {
+                            Task::none()
+                        }
+                    }
+                };
+            }
 
             Message::SwitchFocus(focus) => {
                 // Sync cursor to the current active item when switching.
@@ -469,6 +479,9 @@ impl AppState {
                 if self.focus == Focus::TrackList {
                     if let Some(track) = self.tracks.get(self.track_cursor) {
                         self.edit_state = Some(EditState::from_track(track));
+                        return iced::widget::text_input::focus(iced::widget::text_input::Id::new(
+                            crate::ui::views::dialog::TITLE_INPUT_ID,
+                        ));
                     }
                 }
                 Task::none()
@@ -553,6 +566,9 @@ impl AppState {
                 self.edit_state = None;
                 Task::none()
             }
+
+            Message::FocusNext => iced::widget::focus_next(),
+            Message::FocusPrev => iced::widget::focus_previous(),
 
             Message::Audio(event) => match event {
                 AudioEvent::Progress { position, duration } => {
@@ -694,6 +710,8 @@ impl AppState {
                     Key::Named(Named::ArrowUp) => Some(Message::MoveCursor(-1)),
                     Key::Named(Named::ArrowDown) => Some(Message::MoveCursor(1)),
                     Key::Named(Named::Escape) => Some(Message::CancelEdit),
+                    Key::Named(Named::Tab) if mods.shift() => Some(Message::FocusPrev),
+                    Key::Named(Named::Tab) => Some(Message::FocusNext),
                     Key::Named(Named::Enter) => Some(Message::ActivateCursor),
                     Key::Named(Named::ArrowRight) if mods.shift() => {
                         Some(Message::SeekRelative(seek))
