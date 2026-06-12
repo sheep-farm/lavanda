@@ -28,7 +28,7 @@ impl canvas::Program<Message> for SpectrumCanvas {
         }
 
         let slot = bounds.width / n as f32;
-        let bar_w = (slot * 0.25).max(1.0);
+        let bar_w = (slot * 0.25).clamp(1.0, 2.0);
         let center_y = bounds.height / 2.0;
 
         for (i, &amp) in self.bins.iter().enumerate() {
