@@ -15,6 +15,7 @@ pub struct Config {
     pub language: String,
     pub seek_step: u64,
     pub volume_step: f32,
+    pub play_on_click: bool,
 }
 
 impl Default for Config {
@@ -27,6 +28,7 @@ impl Default for Config {
             language: "auto".into(),
             seek_step: 5,
             volume_step: 0.05,
+            play_on_click: true,
         }
     }
 }
@@ -118,4 +120,8 @@ seek_step = 5
 
 # Volume delta per + / - keypress
 volume_step = 0.05
+
+# Play track immediately on click/Enter (true) or just move the cursor (false)
+# Toggle at runtime with the i key
+play_on_click = true
 "#;

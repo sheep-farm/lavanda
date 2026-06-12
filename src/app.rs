@@ -69,7 +69,6 @@ pub enum Message {
     SelectFolder(PathBuf),
     FolderScanned(PathBuf, Vec<Track>),
 
-    PlayTrack(Track),
     CoverLoaded(PathBuf, Option<Vec<u8>>),
     PlayPause,
     NextTrack,
@@ -90,6 +89,8 @@ pub enum Message {
     SwitchFocus(Focus),
 
     EditCursorTrack,
+    TogglePlayOnClick,
+    TrackClicked(Track, usize),
     EditField(EditField, String),
     FocusNext,
     FocusPrev,
@@ -113,6 +114,7 @@ pub struct AppState {
     pub volume: f32,
     pub shuffle: bool,
     pub repeat: bool,
+    pub play_on_click: bool,
 
     pub folders: Vec<PathBuf>,
     pub selected_folder: Option<PathBuf>,
@@ -196,6 +198,7 @@ impl AppState {
             volume,
             shuffle: cfg.shuffle,
             repeat: cfg.repeat,
+            play_on_click: cfg.play_on_click,
             folders,
             selected_folder,
             tracks: Vec::new(),
@@ -297,14 +300,6 @@ impl AppState {
                 }
                 self.persist_state();
                 Task::none()
-            }
-
-            Message::PlayTrack(track) => {
-                if let Some(idx) = self.tracks.iter().position(|t| t.id == track.id) {
-                    self.track_cursor = idx;
-                }
-                self.queue = self.tracks.clone();
-                self.start_playback(track)
             }
 
             Message::CoverLoaded(path, cover) => {
@@ -473,6 +468,22 @@ impl AppState {
                 }
                 self.focus = focus;
                 Task::none()
+            }
+
+            Message::TogglePlayOnClick => {
+                self.play_on_click = !self.play_on_click;
+                Task::none()
+            }
+
+            Message::TrackClicked(track, idx) => {
+                self.track_cursor = idx;
+                self.focus = Focus::TrackList;
+                if self.play_on_click {
+                    self.queue = self.tracks.clone();
+                    self.start_playback(track)
+                } else {
+                    Task::none()
+                }
             }
 
             Message::EditCursorTrack => {
@@ -722,6 +733,7 @@ impl AppState {
                     Key::Named(Named::ArrowRight) => Some(Message::SwitchFocus(Focus::TrackList)),
                     Key::Named(Named::ArrowLeft) => Some(Message::SwitchFocus(Focus::Sidebar)),
                     Key::Character(ref c) => match c.as_str() {
+                        "i" | "I" => Some(Message::TogglePlayOnClick),
                         "m" | "M" => Some(Message::EditCursorTrack),
                         "n" | "N" => Some(Message::NextTrack),
                         "p" | "P" => Some(Message::PreviousTrack),
@@ -758,24 +770,34 @@ impl AppState {
     }
 
     fn header_view(&self) -> Element<'_, Message> {
-        container(
-            row![
-                text(crate::ui::icons::ICON_MUSIC)
+        let mut header_row = row![
+            text(crate::ui::icons::ICON_MUSIC)
+                .font(crate::ui::icons::NERD_FONT_MONO)
+                .color(theme::accent())
+                .size(16),
+            Space::with_width(6),
+            text("lavanda")
+                .color(theme::accent())
+                .size(16)
+                .font(crate::ui::icons::UI_FONT_BOLD),
+            Space::with_width(Length::Fill),
+        ]
+        .align_y(Alignment::Center);
+
+        if !self.play_on_click {
+            header_row = header_row.push(
+                text("󰆽  manual")
                     .font(crate::ui::icons::NERD_FONT_MONO)
-                    .color(theme::accent())
-                    .size(16),
-                Space::with_width(6),
-                text("lavanda")
-                    .color(theme::accent())
-                    .size(16)
-                    .font(crate::ui::icons::UI_FONT_BOLD),
-            ]
-            .align_y(Alignment::Center),
-        )
-        .style(theme::header)
-        .width(Length::Fill)
-        .padding([0, 16])
-        .into()
+                    .color(theme::overlay0())
+                    .size(11),
+            );
+        }
+
+        container(header_row)
+            .style(theme::header)
+            .width(Length::Fill)
+            .padding([0, 16])
+            .into()
     }
 
     /// Inicia a reprodução de `track`: dispara o áudio imediatamente e agenda

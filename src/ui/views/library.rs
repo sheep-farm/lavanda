@@ -196,7 +196,7 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
 
             rows.push(
                 button(styled)
-                    .on_press(Message::PlayTrack(track.clone()))
+                    .on_press(Message::TrackClicked(track.clone(), track_idx))
                     .style(iced::widget::button::text)
                     .width(Length::Fill)
                     .padding(0)
