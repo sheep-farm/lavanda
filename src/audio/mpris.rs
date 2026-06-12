@@ -57,22 +57,34 @@ pub fn launch(
             };
 
             let tx = cmd_tx.clone();
-            player.connect_play(move |_| { let _ = tx.send(MprisCommand::Play); });
+            player.connect_play(move |_| {
+                let _ = tx.send(MprisCommand::Play);
+            });
 
             let tx = cmd_tx.clone();
-            player.connect_pause(move |_| { let _ = tx.send(MprisCommand::Pause); });
+            player.connect_pause(move |_| {
+                let _ = tx.send(MprisCommand::Pause);
+            });
 
             let tx = cmd_tx.clone();
-            player.connect_play_pause(move |_| { let _ = tx.send(MprisCommand::PlayPause); });
+            player.connect_play_pause(move |_| {
+                let _ = tx.send(MprisCommand::PlayPause);
+            });
 
             let tx = cmd_tx.clone();
-            player.connect_next(move |_| { let _ = tx.send(MprisCommand::Next); });
+            player.connect_next(move |_| {
+                let _ = tx.send(MprisCommand::Next);
+            });
 
             let tx = cmd_tx.clone();
-            player.connect_previous(move |_| { let _ = tx.send(MprisCommand::Previous); });
+            player.connect_previous(move |_| {
+                let _ = tx.send(MprisCommand::Previous);
+            });
 
             let tx = cmd_tx.clone();
-            player.connect_stop(move |_| { let _ = tx.send(MprisCommand::Stop); });
+            player.connect_stop(move |_| {
+                let _ = tx.send(MprisCommand::Stop);
+            });
 
             // Executa o loop D-Bus do player em paralelo com o loop de updates.
             // Sem isso, o player registra no D-Bus mas não processa nenhum comando.
@@ -80,7 +92,12 @@ pub fn launch(
 
             while let Some(update) = update_rx.recv().await {
                 match update {
-                    MprisUpdate::Metadata { title, artist, album, duration_us } => {
+                    MprisUpdate::Metadata {
+                        title,
+                        artist,
+                        album,
+                        duration_us,
+                    } => {
                         let metadata = Metadata::builder()
                             .title(title)
                             .artist([artist])

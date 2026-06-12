@@ -9,11 +9,12 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     let track_list = track_list_view(state);
 
     let drag_handle = mouse_area(
-        container(Space::new(Length::Fixed(4.0), Length::Fill))
-            .style(|_| iced::widget::container::Style {
+        container(Space::new(Length::Fixed(4.0), Length::Fill)).style(|_| {
+            iced::widget::container::Style {
                 background: Some(iced::Background::Color(crate::ui::theme::surface0())),
                 ..Default::default()
-            }),
+            }
+        }),
     )
     .on_press(Message::SidebarDragStart);
 
@@ -25,34 +26,37 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 
 fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
     let items: Element<Message> = column(
-        state.folders.iter().map(|path| {
-            let is_selected = state.selected_folder.as_ref() == Some(path);
-            let name = path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("?");
+        state
+            .folders
+            .iter()
+            .map(|path| {
+                let is_selected = state.selected_folder.as_ref() == Some(path);
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
-            let label = text(name)
-                .color(if is_selected { theme::accent() } else { theme::text() })
-                .size(14);
+                let label = text(name)
+                    .color(if is_selected {
+                        theme::accent()
+                    } else {
+                        theme::text()
+                    })
+                    .size(14);
 
-            let btn = button(label)
-                .on_press(Message::SelectFolder(path.clone()))
-                .style(iced::widget::button::text)
-                .width(Length::Fill)
-                .padding([6, 12]);
-
-            if is_selected {
-                container(btn)
-                    .style(theme::selected_row)
+                let btn = button(label)
+                    .on_press(Message::SelectFolder(path.clone()))
+                    .style(iced::widget::button::text)
                     .width(Length::Fill)
-                    .into()
-            } else {
-                container(btn)
-                    .width(Length::Fill)
-                    .into()
-            }
-        })
-        .collect::<Vec<_>>(),
+                    .padding([6, 12]);
+
+                if is_selected {
+                    container(btn)
+                        .style(theme::selected_row)
+                        .width(Length::Fill)
+                        .into()
+                } else {
+                    container(btn).width(Length::Fill).into()
+                }
+            })
+            .collect::<Vec<_>>(),
     )
     .spacing(2)
     .into();
@@ -131,17 +135,19 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
 
         for track in tracks.into_iter() {
             let is_current = current_id == Some(track.id);
-            let row_color = if is_current { theme::accent() } else { theme::text() };
+            let row_color = if is_current {
+                theme::accent()
+            } else {
+                theme::text()
+            };
 
-            let num = track.track_number
+            let num = track
+                .track_number
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| "·".to_string());
 
             let track_row = row![
-                text(num)
-                    .color(theme::overlay0())
-                    .size(13)
-                    .width(30),
+                text(num).color(theme::overlay0()).size(13).width(30),
                 text(track.title.clone())
                     .color(row_color)
                     .size(14)
@@ -160,7 +166,9 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
             .padding([5, 12]);
 
             let styled = if is_current {
-                container(track_row).style(theme::selected_row).width(Length::Fill)
+                container(track_row)
+                    .style(theme::selected_row)
+                    .width(Length::Fill)
             } else {
                 container(track_row).width(Length::Fill)
             };

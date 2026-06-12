@@ -25,9 +25,13 @@ pub fn progress_bar<'a>(position: Duration, duration: Duration) -> Element<'a, M
     .width(Length::Fill);
 
     row![
-        text(fmt_duration(position)).color(theme::subtext()).size(13),
+        text(fmt_duration(position))
+            .color(theme::subtext())
+            .size(13),
         bar,
-        text(fmt_duration(duration)).color(theme::subtext()).size(13),
+        text(fmt_duration(duration))
+            .color(theme::subtext())
+            .size(13),
     ]
     .spacing(8)
     .align_y(Alignment::Center)

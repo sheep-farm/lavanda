@@ -10,33 +10,29 @@ use iced::{Border, Color};
 static PALETTE: OnceLock<Mutex<Palette>> = OnceLock::new();
 
 struct Palette {
-    base:     Color,
-    mantle:   Color,
+    base: Color,
+    mantle: Color,
     surface0: Color,
     overlay0: Color,
-    text:     Color,
-    subtext:  Color,
-    accent:   Color,
-    green:    Color,
-    red:      Color,
-    yellow:   Color,
-    blue:     Color,
+    text: Color,
+    subtext: Color,
+    accent: Color,
+    green: Color,
+    red: Color,
 }
 
 impl Palette {
     fn default_lavender() -> Self {
         Palette {
-            base:     hex(0x11, 0x11, 0x1b),
-            mantle:   hex(0x18, 0x18, 0x25),
+            base: hex(0x11, 0x11, 0x1b),
+            mantle: hex(0x18, 0x18, 0x25),
             surface0: hex(0x31, 0x32, 0x44),
             overlay0: hex(0x6c, 0x70, 0x86),
-            text:     hex(0xcd, 0xd6, 0xf4),
-            subtext:  hex(0xa6, 0xad, 0xc8),
-            accent:   hex(0xcb, 0xa6, 0xf7),
-            green:    hex(0xa6, 0xe3, 0xa1),
-            red:      hex(0xf3, 0x8b, 0xa8),
-            yellow:   hex(0xf9, 0xe2, 0xaf),
-            blue:     hex(0x89, 0xb4, 0xfa),
+            text: hex(0xcd, 0xd6, 0xf4),
+            subtext: hex(0xa6, 0xad, 0xc8),
+            accent: hex(0xcb, 0xa6, 0xf7),
+            green: hex(0xa6, 0xe3, 0xa1),
+            red: hex(0xf3, 0x8b, 0xa8),
         }
     }
 }
@@ -78,15 +74,16 @@ pub fn read_current_theme_name() -> String {
 fn try_load_omarchy_theme() -> Option<Palette> {
     let home = home_dir()?;
 
-    let theme_name = std::fs::read_to_string(
-        home.join(".config/omarchy/current/theme.name"),
-    )
-    .ok()?
-    .trim()
-    .to_string();
+    let theme_name = std::fs::read_to_string(home.join(".config/omarchy/current/theme.name"))
+        .ok()?
+        .trim()
+        .to_string();
 
-    let user_path   = home.join(format!(".config/omarchy/themes/{}/colors.toml",      theme_name));
-    let system_path = home.join(format!(".local/share/omarchy/themes/{}/colors.toml", theme_name));
+    let user_path = home.join(format!(".config/omarchy/themes/{}/colors.toml", theme_name));
+    let system_path = home.join(format!(
+        ".local/share/omarchy/themes/{}/colors.toml",
+        theme_name
+    ));
 
     let content = std::fs::read_to_string(&user_path)
         .or_else(|_| std::fs::read_to_string(&system_path))
@@ -100,15 +97,21 @@ fn parse_colors_toml(content: &str) -> Option<Palette> {
     let mut map: HashMap<String, Color> = HashMap::new();
     for line in content.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
 
-        let Some((key, val)) = line.split_once('=') else { continue };
+        let Some((key, val)) = line.split_once('=') else {
+            continue;
+        };
         let key = key.trim().to_string();
         let val = val.trim();
 
         let hex6 = if let Some(pos) = val.find('#') {
             let after = &val[pos + 1..];
-            let end = after.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(after.len());
+            let end = after
+                .find(|c: char| !c.is_ascii_hexdigit())
+                .unwrap_or(after.len());
             after[..end.min(6)].to_string()
         } else {
             val.trim_matches('"').chars().take(6).collect()
@@ -121,11 +124,13 @@ fn parse_colors_toml(content: &str) -> Option<Palette> {
         }
     }
 
-    let bg     = *map.get("background")?;
-    let fg     = *map.get("foreground")?;
+    let bg = *map.get("background")?;
+    let fg = *map.get("foreground")?;
     let accent = *map.get("accent")?;
 
-    let c8 = map.get("color8").copied()
+    let c8 = map
+        .get("color8")
+        .copied()
         .unwrap_or_else(|| lerp_color(bg, fg, 0.3));
 
     let is_dark = luminance(bg) < 0.5;
@@ -141,13 +146,19 @@ fn parse_colors_toml(content: &str) -> Option<Palette> {
         surface0,
         overlay0: c8,
         text: fg,
-        subtext:  map.get("color15").copied()
+        subtext: map
+            .get("color15")
+            .copied()
             .unwrap_or_else(|| lerp_color(fg, c8, 0.3)),
         accent,
-        red:    map.get("color1").copied().unwrap_or_else(|| hex(0xf3, 0x8b, 0xa8)),
-        green:  map.get("color2").copied().unwrap_or_else(|| hex(0xa6, 0xe3, 0xa1)),
-        yellow: map.get("color3").copied().unwrap_or_else(|| hex(0xf9, 0xe2, 0xaf)),
-        blue:   map.get("color4").copied().unwrap_or_else(|| hex(0x89, 0xb4, 0xfa)),
+        red: map
+            .get("color1")
+            .copied()
+            .unwrap_or_else(|| hex(0xf3, 0x8b, 0xa8)),
+        green: map
+            .get("color2")
+            .copied()
+            .unwrap_or_else(|| hex(0xa6, 0xe3, 0xa1)),
     })
 }
 
@@ -170,21 +181,21 @@ fn home_dir() -> Option<PathBuf> {
 
 macro_rules! color_fn {
     ($name:ident, $field:ident) => {
-        pub fn $name() -> Color { palette_mutex().lock().unwrap().$field }
+        pub fn $name() -> Color {
+            palette_mutex().lock().unwrap().$field
+        }
     };
 }
 
-color_fn!(base,     base);
-color_fn!(mantle,   mantle);
+color_fn!(base, base);
+color_fn!(mantle, mantle);
 color_fn!(surface0, surface0);
 color_fn!(overlay0, overlay0);
-color_fn!(text,     text);
-color_fn!(subtext,  subtext);
-color_fn!(accent,   accent);
-color_fn!(green,    green);
-color_fn!(red,      red);
-color_fn!(yellow,   yellow);
-color_fn!(blue,     blue);
+color_fn!(text, text);
+color_fn!(subtext, subtext);
+color_fn!(accent, accent);
+color_fn!(green, green);
+color_fn!(red, red);
 
 // ── Utilitários ──────────────────────────────────────────────────────────────
 
@@ -210,7 +221,11 @@ pub fn lerp_color(a: Color, b: Color, t: f32) -> Color {
 pub fn card(_: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(mantle())),
-        border: Border { color: surface0(), width: 1.0, radius: 0.0.into() },
+        border: Border {
+            color: surface0(),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
         ..Default::default()
     }
 }
@@ -225,7 +240,11 @@ pub fn header(_: &iced::Theme) -> container::Style {
 pub fn sidebar(_: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(mantle())),
-        border: Border { color: surface0(), width: 1.0, radius: 0.0.into() },
+        border: Border {
+            color: surface0(),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
         ..Default::default()
     }
 }
@@ -233,7 +252,11 @@ pub fn sidebar(_: &iced::Theme) -> container::Style {
 pub fn selected_row(_: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(with_alpha(accent(), 0.15))),
-        border: Border { color: with_alpha(accent(), 0.4), width: 1.0, radius: 0.0.into() },
+        border: Border {
+            color: with_alpha(accent(), 0.4),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
         ..Default::default()
     }
 }
@@ -241,7 +264,11 @@ pub fn selected_row(_: &iced::Theme) -> container::Style {
 pub fn player_panel(_: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(mantle())),
-        border: Border { color: surface0(), width: 1.0, radius: 0.0.into() },
+        border: Border {
+            color: surface0(),
+            width: 1.0,
+            radius: 0.0.into(),
+        },
         ..Default::default()
     }
 }
@@ -249,15 +276,11 @@ pub fn player_panel(_: &iced::Theme) -> container::Style {
 pub fn album_header(_: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(with_alpha(surface0(), 0.5))),
-        border: Border { color: with_alpha(accent(), 0.2), width: 0.0, radius: 0.0.into() },
+        border: Border {
+            color: with_alpha(accent(), 0.2),
+            width: 0.0,
+            radius: 0.0.into(),
+        },
         ..Default::default()
-    }
-}
-
-pub fn spectrum_bar_color(amplitude: f32) -> Color {
-    if amplitude < 0.5 {
-        lerp_color(green(), accent(), amplitude * 2.0)
-    } else {
-        lerp_color(accent(), red(), (amplitude - 0.5) * 2.0)
     }
 }

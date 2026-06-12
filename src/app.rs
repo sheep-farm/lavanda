@@ -2,12 +2,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use iced::widget::{container, column, row, text, Space};
+use iced::widget::{column, container, row, text, Space};
 use iced::{Alignment, Element, Length, Subscription, Task, Theme};
 use mpris_server::{LoopStatus, PlaybackStatus};
 
-use crate::audio::{AudioCommand, AudioEvent, AudioPlayer, MprisCommand, MprisUpdate, PlaybackState};
 use crate::audio::mpris;
+use crate::audio::{
+    AudioCommand, AudioEvent, AudioPlayer, MprisCommand, MprisUpdate, PlaybackState,
+};
 use crate::library::models::Track;
 use crate::library::{load_cover, scan_folder};
 use crate::ui::{theme, views};
@@ -152,7 +154,10 @@ impl AppState {
 
             Message::PlayTrack(track) => {
                 let cover_data = load_cover(&track.path);
-                let track = Track { cover_data, ..track };
+                let track = Track {
+                    cover_data,
+                    ..track
+                };
                 self.audio.send(AudioCommand::Play(track.path.clone()));
                 self.audio.send(AudioCommand::SetVolume(self.volume));
                 self.queue = self.tracks.clone();
@@ -179,7 +184,10 @@ impl AppState {
                         if let Some(first) = self.tracks.first().cloned() {
                             self.queue = self.tracks.clone();
                             let cover_data = load_cover(&first.path);
-                            let first = Track { cover_data, ..first };
+                            let first = Track {
+                                cover_data,
+                                ..first
+                            };
                             self.audio.send(AudioCommand::Play(first.path.clone()));
                             self.current_track = Some(first);
                             self.playback_state = PlaybackState::Playing;
@@ -191,8 +199,14 @@ impl AppState {
                 Task::none()
             }
 
-            Message::NextTrack     => { self.advance_track(1);  Task::none() }
-            Message::PreviousTrack => { self.advance_track(-1); Task::none() }
+            Message::NextTrack => {
+                self.advance_track(1);
+                Task::none()
+            }
+            Message::PreviousTrack => {
+                self.advance_track(-1);
+                Task::none()
+            }
 
             Message::Seek(dur) => {
                 self.audio.send(AudioCommand::Seek(dur));
@@ -202,7 +216,8 @@ impl AppState {
 
             Message::SeekRelative(delta_secs) => {
                 let new_pos = if delta_secs < 0 {
-                    self.position.saturating_sub(Duration::from_secs(delta_secs.unsigned_abs()))
+                    self.position
+                        .saturating_sub(Duration::from_secs(delta_secs.unsigned_abs()))
                 } else {
                     (self.position + Duration::from_secs(delta_secs as u64)).min(self.duration)
                 };
@@ -234,7 +249,11 @@ impl AppState {
 
             Message::ToggleRepeat => {
                 self.repeat = !self.repeat;
-                let loop_status = if self.repeat { LoopStatus::Track } else { LoopStatus::None };
+                let loop_status = if self.repeat {
+                    LoopStatus::Track
+                } else {
+                    LoopStatus::None
+                };
                 self.send_mpris(MprisUpdate::Loop(loop_status));
                 Task::none()
             }
@@ -281,7 +300,7 @@ impl AppState {
                             }
                         }
                         AudioEvent::Error(e) => eprintln!("Erro de áudio: {e}"),
-                        AudioEvent::Playing { .. } => {
+                        AudioEvent::Playing => {
                             self.playback_state = PlaybackState::Playing;
                         }
                     }
@@ -303,22 +322,24 @@ impl AppState {
                                 self.send_mpris(MprisUpdate::Status(PlaybackStatus::Paused));
                             }
                         }
-                        MprisCommand::PlayPause => {
-                            match self.playback_state {
-                                PlaybackState::Playing => {
-                                    self.audio.send(AudioCommand::Pause);
-                                    self.playback_state = PlaybackState::Paused;
-                                    self.send_mpris(MprisUpdate::Status(PlaybackStatus::Paused));
-                                }
-                                _ => {
-                                    self.audio.send(AudioCommand::Resume);
-                                    self.playback_state = PlaybackState::Playing;
-                                    self.send_mpris(MprisUpdate::Status(PlaybackStatus::Playing));
-                                }
+                        MprisCommand::PlayPause => match self.playback_state {
+                            PlaybackState::Playing => {
+                                self.audio.send(AudioCommand::Pause);
+                                self.playback_state = PlaybackState::Paused;
+                                self.send_mpris(MprisUpdate::Status(PlaybackStatus::Paused));
                             }
+                            _ => {
+                                self.audio.send(AudioCommand::Resume);
+                                self.playback_state = PlaybackState::Playing;
+                                self.send_mpris(MprisUpdate::Status(PlaybackStatus::Playing));
+                            }
+                        },
+                        MprisCommand::Next => {
+                            self.advance_track(1);
                         }
-                        MprisCommand::Next     => { self.advance_track(1);  }
-                        MprisCommand::Previous => { self.advance_track(-1); }
+                        MprisCommand::Previous => {
+                            self.advance_track(-1);
+                        }
                         MprisCommand::Stop => {
                             self.audio.send(AudioCommand::Stop);
                             self.playback_state = PlaybackState::Stopped;
@@ -368,21 +389,21 @@ impl AppState {
             iced::time::every(Duration::from_millis(100)).map(|_| Message::PollAudio),
             iced::time::every(Duration::from_secs(3)).map(|_| Message::CheckTheme),
             iced::keyboard::on_key_press(|key, _mods| {
-                use iced::keyboard::Key;
                 use iced::keyboard::key::Named;
+                use iced::keyboard::Key;
                 let seek = crate::config::get().seek_step as i64;
-                let vol  = crate::config::get().volume_step;
+                let vol = crate::config::get().volume_step;
                 match key {
-                    Key::Named(Named::Space)      => Some(Message::PlayPause),
+                    Key::Named(Named::Space) => Some(Message::PlayPause),
                     Key::Named(Named::ArrowRight) => Some(Message::SeekRelative(seek)),
-                    Key::Named(Named::ArrowLeft)  => Some(Message::SeekRelative(-seek)),
+                    Key::Named(Named::ArrowLeft) => Some(Message::SeekRelative(-seek)),
                     Key::Character(ref c) => match c.as_str() {
                         "n" | "N" => Some(Message::NextTrack),
                         "p" | "P" => Some(Message::PreviousTrack),
                         "s" | "S" => Some(Message::ToggleShuffle),
                         "r" | "R" => Some(Message::ToggleRepeat),
                         "+" | "=" => Some(Message::VolumeStep(vol)),
-                        "-"       => Some(Message::VolumeStep(-vol)),
+                        "-" => Some(Message::VolumeStep(-vol)),
                         _ => None,
                     },
                     _ => None,
@@ -439,24 +460,36 @@ impl AppState {
 
         let next_idx = if self.shuffle {
             use rand::Rng;
-            let current_idx = self.current_track.as_ref()
+            let current_idx = self
+                .current_track
+                .as_ref()
                 .and_then(|ct| self.queue.iter().position(|t| t.id == ct.id));
             let len = self.queue.len();
-            if len == 1 { 0 } else {
+            if len == 1 {
+                0
+            } else {
                 let mut rng = rand::thread_rng();
                 let mut idx = rng.gen_range(0..len);
                 if let Some(cur) = current_idx {
-                    while idx == cur { idx = rng.gen_range(0..len); }
+                    while idx == cur {
+                        idx = rng.gen_range(0..len);
+                    }
                 }
                 idx
             }
         } else {
-            let current_idx = self.current_track.as_ref()
+            let current_idx = self
+                .current_track
+                .as_ref()
                 .and_then(|ct| self.queue.iter().position(|t| t.id == ct.id));
             match current_idx {
                 Some(i) => {
                     let new = i as i32 + delta;
-                    if new < 0 { self.queue.len() - 1 } else { new as usize % self.queue.len() }
+                    if new < 0 {
+                        self.queue.len() - 1
+                    } else {
+                        new as usize % self.queue.len()
+                    }
                 }
                 None => 0,
             }
@@ -464,7 +497,10 @@ impl AppState {
 
         if let Some(track) = self.queue.get(next_idx).cloned() {
             let cover_data = load_cover(&track.path);
-            let track = Track { cover_data, ..track };
+            let track = Track {
+                cover_data,
+                ..track
+            };
             self.audio.send(AudioCommand::Play(track.path.clone()));
             self.current_track = Some(track);
             self.playback_state = PlaybackState::Playing;
@@ -489,8 +525,12 @@ fn music_subfolders(music_dir: &PathBuf) -> Vec<PathBuf> {
 }
 
 fn sidebar_width_path() -> PathBuf {
-    let xdg = std::env::var("XDG_CONFIG_HOME")
-        .unwrap_or_else(|_| format!("{}/.config", std::env::var("HOME").unwrap_or_else(|_| "/tmp".into())));
+    let xdg = std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
+        format!(
+            "{}/.config",
+            std::env::var("HOME").unwrap_or_else(|_| "/tmp".into())
+        )
+    });
     PathBuf::from(xdg).join("lavanda").join("sidebar_width")
 }
 
@@ -514,10 +554,10 @@ fn build_iced_theme() -> Theme {
         "Omarchy".into(),
         iced::theme::Palette {
             background: theme::base(),
-            text:       theme::text(),
-            primary:    theme::accent(),
-            success:    theme::green(),
-            danger:     theme::red(),
+            text: theme::text(),
+            primary: theme::accent(),
+            success: theme::green(),
+            danger: theme::red(),
         },
     )
 }

@@ -8,9 +8,7 @@ use crate::ui::{icons, theme};
 pub fn view(state: &AppState) -> Element<'_, Message> {
     let track_info: Element<Message> = if let Some(track) = &state.current_track {
         column![
-            text(&track.artist)
-                .color(theme::subtext())
-                .size(13),
+            text(&track.artist).color(theme::subtext()).size(13),
             text(&track.title)
                 .color(theme::text())
                 .size(20)
@@ -18,21 +16,32 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
                     weight: iced::font::Weight::Bold,
                     ..crate::ui::icons::UI_FONT
                 }),
-            text(format!("{} ({})", track.album, track.track_number.map(|n| n.to_string()).unwrap_or_default()))
-                .color(theme::subtext())
-                .size(13),
+            text(format!(
+                "{} ({})",
+                track.album,
+                track
+                    .track_number
+                    .map(|n| n.to_string())
+                    .unwrap_or_default()
+            ))
+            .color(theme::subtext())
+            .size(13),
         ]
         .spacing(4)
         .into()
     } else {
-        column![
-            text(state.strings.no_track).color(theme::overlay0()).size(16),
-        ]
+        column![text(state.strings.no_track)
+            .color(theme::overlay0())
+            .size(16),]
         .into()
     };
 
     // Capa do álbum
-    let cover: Element<Message> = if let Some(data) = state.current_track.as_ref().and_then(|t| t.cover_data.as_ref()) {
+    let cover: Element<Message> = if let Some(data) = state
+        .current_track
+        .as_ref()
+        .and_then(|t| t.cover_data.as_ref())
+    {
         let handle = image::Handle::from_bytes(data.clone());
         image(handle)
             .width(180)

@@ -3,13 +3,13 @@ use std::sync::OnceLock;
 static LOCALE: OnceLock<&'static Strings> = OnceLock::new();
 
 pub struct Strings {
-    pub sidebar_folders:  &'static str,
-    pub no_track:         &'static str,
-    pub no_tracks_found:  &'static str,
-    pub select_folder:    &'static str,
-    pub unknown:          &'static str,
-    track_singular:       &'static str,
-    track_plural:         &'static str,
+    pub sidebar_folders: &'static str,
+    pub no_track: &'static str,
+    pub no_tracks_found: &'static str,
+    pub select_folder: &'static str,
+    pub unknown: &'static str,
+    track_singular: &'static str,
+    track_plural: &'static str,
 }
 
 impl Strings {
@@ -25,33 +25,33 @@ impl Strings {
 // ── Traduções ─────────────────────────────────────────────────────────────────
 
 static EN: Strings = Strings {
-    sidebar_folders:  "Folders",
-    no_track:         "No track",
-    no_tracks_found:  "No tracks found",
-    select_folder:    "Select a folder",
-    unknown:          "Unknown",
-    track_singular:   "track",
-    track_plural:     "tracks",
+    sidebar_folders: "Folders",
+    no_track: "No track",
+    no_tracks_found: "No tracks found",
+    select_folder: "Select a folder",
+    unknown: "Unknown",
+    track_singular: "track",
+    track_plural: "tracks",
 };
 
 static PT_BR: Strings = Strings {
-    sidebar_folders:  "Pastas",
-    no_track:         "Nenhuma faixa",
-    no_tracks_found:  "Nenhuma faixa encontrada",
-    select_folder:    "Selecione uma pasta",
-    unknown:          "Desconhecido",
-    track_singular:   "faixa",
-    track_plural:     "faixas",
+    sidebar_folders: "Pastas",
+    no_track: "Nenhuma faixa",
+    no_tracks_found: "Nenhuma faixa encontrada",
+    select_folder: "Selecione uma pasta",
+    unknown: "Desconhecido",
+    track_singular: "faixa",
+    track_plural: "faixas",
 };
 
 static ES: Strings = Strings {
-    sidebar_folders:  "Carpetas",
-    no_track:         "Sin pista",
-    no_tracks_found:  "Sin pistas",
-    select_folder:    "Selecciona una carpeta",
-    unknown:          "Desconocido",
-    track_singular:   "pista",
-    track_plural:     "pistas",
+    sidebar_folders: "Carpetas",
+    no_track: "Sin pista",
+    no_tracks_found: "Sin pistas",
+    select_folder: "Selecciona una carpeta",
+    unknown: "Desconocido",
+    track_singular: "pista",
+    track_plural: "pistas",
 };
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
@@ -75,7 +75,11 @@ fn detect() -> &'static Strings {
         override_lang
     };
     let lang = lang.split('.').next().unwrap_or("").to_lowercase();
-    if lang.starts_with("pt") { &PT_BR }
-    else if lang.starts_with("es") { &ES }
-    else { &EN }
+    if lang.starts_with("pt") {
+        &PT_BR
+    } else if lang.starts_with("es") {
+        &ES
+    } else {
+        &EN
+    }
 }

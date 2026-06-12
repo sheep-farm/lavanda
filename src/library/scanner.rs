@@ -8,14 +8,21 @@ use walkdir::WalkDir;
 
 use super::models::Track;
 
-const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "ogg", "opus", "wav", "aac", "m4a", "wma", "aiff"];
+const AUDIO_EXTENSIONS: &[&str] = &[
+    "mp3", "flac", "ogg", "opus", "wav", "aac", "m4a", "wma", "aiff",
+];
 
 const COVER_FILENAMES: &[&str] = &[
-    "cover.jpg", "Cover.jpg",
-    "cover.png", "Cover.png",
-    "cover.webp", "Cover.webp",
-    "folder.jpg", "Folder.jpg",
-    "folder.png", "Folder.png",
+    "cover.jpg",
+    "Cover.jpg",
+    "cover.png",
+    "Cover.png",
+    "cover.webp",
+    "Cover.webp",
+    "folder.jpg",
+    "Folder.jpg",
+    "folder.png",
+    "Folder.png",
 ];
 
 /// Escaneia `dir` recursivamente e retorna as faixas ordenadas por álbum/número/título.
@@ -37,35 +44,41 @@ pub fn scan_folder(dir: &Path) -> Vec<Track> {
         .collect();
 
     pairs.sort_by(|(_, a), (_, b)| {
-        a.album.cmp(&b.album)
+        a.album
+            .cmp(&b.album)
             .then(a.track_number.cmp(&b.track_number))
             .then(a.title.cmp(&b.title))
     });
 
-    pairs.into_iter().enumerate().map(|(i, (path, info))| Track {
-        id: (i + 1) as i64,
-        path,
-        title: info.title,
-        artist: info.artist,
-        album: info.album,
-        album_id: 0,
-        track_number: info.track_number,
-        duration: Duration::from_millis(info.duration_ms),
-        cover_data: None,
-    }).collect()
+    pairs
+        .into_iter()
+        .enumerate()
+        .map(|(i, (path, info))| Track {
+            id: (i + 1) as i64,
+            path,
+            title: info.title,
+            artist: info.artist,
+            album: info.album,
+            track_number: info.track_number,
+            duration: Duration::from_millis(info.duration_ms),
+            cover_data: None,
+        })
+        .collect()
 }
 
 /// Carrega a capa de uma faixa: tag embutida primeiro, depois cover.jpg na pasta.
 pub fn load_cover(path: &Path) -> Option<Vec<u8>> {
     let tagged = Probe::open(path).ok()?.read().ok()?;
     let embedded = tagged.primary_tag().and_then(|t| {
-        t.pictures().iter().find(|p| {
-            matches!(
-                p.pic_type(),
-                lofty::picture::PictureType::CoverFront | lofty::picture::PictureType::Other
-            )
-        })
-        .map(|p| p.data().to_vec())
+        t.pictures()
+            .iter()
+            .find(|p| {
+                matches!(
+                    p.pic_type(),
+                    lofty::picture::PictureType::CoverFront | lofty::picture::PictureType::Other
+                )
+            })
+            .map(|p| p.data().to_vec())
     });
     embedded.or_else(|| cover_from_folder(path))
 }
@@ -97,14 +110,16 @@ fn read_tags(path: &Path) -> Result<TrackInfo> {
                 .to_string()
         });
 
-    let folder_artist = path.parent()
+    let folder_artist = path
+        .parent()
         .and_then(|p| p.parent())
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str())
         .unwrap_or(unknown)
         .to_string();
 
-    let folder_album = path.parent()
+    let folder_album = path
+        .parent()
         .and_then(|p| p.file_name())
         .and_then(|n| n.to_str())
         .unwrap_or(unknown)
@@ -122,7 +137,13 @@ fn read_tags(path: &Path) -> Result<TrackInfo> {
 
     let track_number = tags.and_then(|t| t.track());
 
-    Ok(TrackInfo { title, artist, album, track_number, duration_ms })
+    Ok(TrackInfo {
+        title,
+        artist,
+        album,
+        track_number,
+        duration_ms,
+    })
 }
 
 fn cover_from_folder(path: &Path) -> Option<Vec<u8>> {

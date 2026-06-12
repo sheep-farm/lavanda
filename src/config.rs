@@ -8,24 +8,24 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 #[derive(Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub music_dir:   String,   // String para suportar "~" antes de expandir
-    pub volume:      f32,
-    pub shuffle:     bool,
-    pub repeat:      bool,
-    pub language:    String,
-    pub seek_step:   u64,
+    pub music_dir: String, // String para suportar "~" antes de expandir
+    pub volume: f32,
+    pub shuffle: bool,
+    pub repeat: bool,
+    pub language: String,
+    pub seek_step: u64,
     pub volume_step: f32,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            music_dir:   "~/Music".into(),
-            volume:      0.8,
-            shuffle:     false,
-            repeat:      false,
-            language:    "auto".into(),
-            seek_step:   5,
+            music_dir: "~/Music".into(),
+            volume: 0.8,
+            shuffle: false,
+            repeat: false,
+            language: "auto".into(),
+            seek_step: 5,
             volume_step: 0.05,
         }
     }

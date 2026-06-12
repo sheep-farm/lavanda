@@ -28,8 +28,16 @@ pub fn playback_controls<'a>(
         .padding([4, 12])
     };
 
-    let shuffle_color = if shuffle { theme::accent() } else { theme::overlay0() };
-    let repeat_color  = if repeat  { theme::accent() } else { theme::overlay0() };
+    let shuffle_color = if shuffle {
+        theme::accent()
+    } else {
+        theme::overlay0()
+    };
+    let repeat_color = if repeat {
+        theme::accent()
+    } else {
+        theme::overlay0()
+    };
 
     let vol_slider = slider(0.0..=1.0f32, volume, Message::VolumeChanged)
         .step(0.01)
@@ -45,11 +53,9 @@ pub fn playback_controls<'a>(
         .on_press(Message::ToggleShuffle)
         .style(iced::widget::button::text)
         .padding([4, 8]),
-
         icon_btn(icons::ICON_PREV, Message::PreviousTrack),
         icon_btn(play_icon, Message::PlayPause),
         icon_btn(icons::ICON_NEXT, Message::NextTrack),
-
         button(
             text(icons::ICON_REPEAT)
                 .font(icons::NERD_FONT_MONO)
@@ -59,14 +65,11 @@ pub fn playback_controls<'a>(
         .on_press(Message::ToggleRepeat)
         .style(iced::widget::button::text)
         .padding([4, 8]),
-
         Space::with_width(16),
-
         text(icons::ICON_VOL_UP)
             .font(icons::NERD_FONT_MONO)
             .color(theme::subtext())
             .size(18),
-
         vol_slider,
     ]
     .spacing(4)
