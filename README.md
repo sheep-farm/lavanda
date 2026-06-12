@@ -249,12 +249,11 @@ No database. No disk cache. All library data lives in memory for the duration of
 
 ## Status
 
-**0.1.0** — functional for daily use.
+**1.0.0** — functional for daily use.
 
 Known limitations:
 - Seek accuracy depends on the container format (Symphonia limitation)
 - No gapless playback between tracks
-- Volume set via slider is not persisted on close (use `+`/`-` keys to adjust persistently)
 
 ---
 
