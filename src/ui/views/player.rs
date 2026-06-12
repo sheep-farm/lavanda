@@ -63,29 +63,35 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         .into()
     };
 
-    let player_row = row![
-        cover,
-        Space::with_width(16),
-        column![
-            track_info,
-            Space::with_height(12),
-            progress::progress_bar(state.position, state.duration),
-            Space::with_height(8),
-            controls::playback_controls(
-                &state.playback_state,
-                state.volume,
-                state.shuffle,
-                state.repeat,
-            ),
-        ]
-        .width(Length::FillPortion(5))
-        .spacing(0),
-        Space::with_width(16),
-        spectrum::spectrum_view(&state.spectrum),
+    let info_col = column![
+        track_info,
+        Space::with_height(12),
+        progress::progress_bar(state.position, state.duration),
+        Space::with_height(8),
+        controls::playback_controls(
+            &state.playback_state,
+            state.volume,
+            state.shuffle,
+            state.repeat,
+        ),
     ]
-    .spacing(0)
-    .align_y(Alignment::Center)
-    .padding(16);
+    .spacing(0);
+
+    let mut player_row = row![cover, Space::with_width(16),];
+
+    if state.show_spectrum {
+        player_row = player_row
+            .push(info_col.width(Length::FillPortion(5)))
+            .push(Space::with_width(16))
+            .push(spectrum::spectrum_view(&state.spectrum));
+    } else {
+        player_row = player_row.push(info_col.width(Length::Fill));
+    }
+
+    let player_row = player_row
+        .spacing(0)
+        .align_y(Alignment::Center)
+        .padding(16);
 
     container(player_row)
         .style(theme::player_panel)

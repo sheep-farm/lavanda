@@ -101,6 +101,7 @@ pub enum Message {
     SearchToggle,
     SearchInput(String),
     ToggleHelp,
+    ToggleSpectrum,
 
     SpectrumData(Vec<f32>),
 
@@ -146,6 +147,7 @@ pub struct AppState {
     pub help_visible: bool,
 
     pub spectrum: Vec<f32>,
+    pub show_spectrum: bool,
 
     audio: AudioPlayer,
     audio_events: Shared<AudioEvent>,
@@ -233,6 +235,7 @@ impl AppState {
             search_active: false,
             help_visible: false,
             spectrum: vec![0.0; crate::audio::spectrum::NUM_BARS],
+            show_spectrum: true,
             audio,
             audio_events,
             spectrum_rx,
@@ -303,6 +306,7 @@ impl AppState {
                     | Message::FocusNext
                     | Message::FocusPrev
                     | Message::SpectrumData(_)
+                    | Message::ToggleSpectrum
             )
         {
             return Task::none();
@@ -329,6 +333,7 @@ impl AppState {
                     | Message::FocusNext
                     | Message::FocusPrev
                     | Message::SpectrumData(_)
+                    | Message::ToggleSpectrum
             )
         {
             return Task::none();
@@ -700,6 +705,11 @@ impl AppState {
                 Task::none()
             }
 
+            Message::ToggleSpectrum => {
+                self.show_spectrum = !self.show_spectrum;
+                Task::none()
+            }
+
             Message::FocusNext => iced::widget::focus_next(),
             Message::FocusPrev => iced::widget::focus_previous(),
 
@@ -877,6 +887,7 @@ impl AppState {
                     Key::Character(ref c) => match c.as_str() {
                         "i" | "I" => Some(Message::TogglePlayOnClick),
                         "m" | "M" => Some(Message::EditCursorTrack),
+                        "v" | "V" => Some(Message::ToggleSpectrum),
                         "/" => Some(Message::SearchToggle),
                         "n" | "N" => Some(Message::NextTrack),
                         "p" | "P" => Some(Message::PreviousTrack),
