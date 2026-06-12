@@ -22,14 +22,14 @@ sha256sums=('c896acdcfd6bee3d81890a36d3f38f7c53de7f74cd0f6fe72feeb61adc2df384')
 
 prepare() {
     cd "$pkgname-$pkgver"
-    cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+    cargo fetch --target "$CARCH-unknown-linux-gnu"
 }
 
 build() {
     cd "$pkgname-$pkgver"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
-    cargo build --frozen --release
+    cargo build --offline --release
 }
 
 package() {
