@@ -22,6 +22,7 @@ pub enum Message {
     FolderScanned(PathBuf, Vec<Track>),
 
     PlayTrack(Track),
+    CoverLoaded(PathBuf, Option<Vec<u8>>),
     PlayPause,
     NextTrack,
     PreviousTrack,
@@ -137,8 +138,11 @@ impl AppState {
                 self.tracks.clear();
                 Task::perform(
                     async move {
-                        let tracks = scan_folder(&path);
-                        (path, tracks)
+                        let p = path.clone();
+                        let tracks = tokio::task::spawn_blocking(move || scan_folder(&path))
+                            .await
+                            .unwrap_or_default();
+                        (p, tracks)
                     },
                     |(path, tracks)| Message::FolderScanned(path, tracks),
                 )
@@ -153,60 +157,44 @@ impl AppState {
             }
 
             Message::PlayTrack(track) => {
-                let cover_data = load_cover(&track.path);
-                let track = Track {
-                    cover_data,
-                    ..track
-                };
-                self.audio.send(AudioCommand::Play(track.path.clone()));
-                self.audio.send(AudioCommand::SetVolume(self.volume));
                 self.queue = self.tracks.clone();
-                self.current_track = Some(track);
-                self.playback_state = PlaybackState::Playing;
-                self.position = Duration::ZERO;
-                self.notify_mpris_track(PlaybackStatus::Playing);
-                Task::none()
+                self.start_playback(track)
             }
 
-            Message::PlayPause => {
-                match self.playback_state {
-                    PlaybackState::Playing => {
-                        self.audio.send(AudioCommand::Pause);
-                        self.playback_state = PlaybackState::Paused;
-                        self.send_mpris(MprisUpdate::Status(PlaybackStatus::Paused));
-                    }
-                    PlaybackState::Paused => {
-                        self.audio.send(AudioCommand::Resume);
-                        self.playback_state = PlaybackState::Playing;
-                        self.send_mpris(MprisUpdate::Status(PlaybackStatus::Playing));
-                    }
-                    PlaybackState::Stopped => {
-                        if let Some(first) = self.tracks.first().cloned() {
-                            self.queue = self.tracks.clone();
-                            let cover_data = load_cover(&first.path);
-                            let first = Track {
-                                cover_data,
-                                ..first
-                            };
-                            self.audio.send(AudioCommand::Play(first.path.clone()));
-                            self.current_track = Some(first);
-                            self.playback_state = PlaybackState::Playing;
-                            self.position = Duration::ZERO;
-                            self.notify_mpris_track(PlaybackStatus::Playing);
-                        }
+            Message::CoverLoaded(path, cover) => {
+                if let Some(track) = &mut self.current_track {
+                    if track.path == path {
+                        track.cover_data = cover;
                     }
                 }
                 Task::none()
             }
 
-            Message::NextTrack => {
-                self.advance_track(1);
-                Task::none()
-            }
-            Message::PreviousTrack => {
-                self.advance_track(-1);
-                Task::none()
-            }
+            Message::PlayPause => match self.playback_state {
+                PlaybackState::Playing => {
+                    self.audio.send(AudioCommand::Pause);
+                    self.playback_state = PlaybackState::Paused;
+                    self.send_mpris(MprisUpdate::Status(PlaybackStatus::Paused));
+                    Task::none()
+                }
+                PlaybackState::Paused => {
+                    self.audio.send(AudioCommand::Resume);
+                    self.playback_state = PlaybackState::Playing;
+                    self.send_mpris(MprisUpdate::Status(PlaybackStatus::Playing));
+                    Task::none()
+                }
+                PlaybackState::Stopped => {
+                    if let Some(first) = self.tracks.first().cloned() {
+                        self.queue = self.tracks.clone();
+                        self.start_playback(first)
+                    } else {
+                        Task::none()
+                    }
+                }
+            },
+
+            Message::NextTrack => self.advance_track(1),
+            Message::PreviousTrack => self.advance_track(-1),
 
             Message::Seek(dur) => {
                 self.audio.send(AudioCommand::Seek(dur));
@@ -275,6 +263,7 @@ impl AppState {
             }
 
             Message::PollAudio => {
+                let mut tasks: Vec<Task<Message>> = Vec::new();
                 while let Ok(event) = self.audio.event_rx.try_recv() {
                     match event {
                         AudioEvent::Progress { position, duration } => {
@@ -296,7 +285,7 @@ impl AppState {
                                     self.notify_mpris_track(PlaybackStatus::Playing);
                                 }
                             } else {
-                                self.advance_track(1);
+                                tasks.push(self.advance_auto());
                             }
                         }
                         AudioEvent::Error(e) => eprintln!("Erro de áudio: {e}"),
@@ -335,10 +324,10 @@ impl AppState {
                             }
                         },
                         MprisCommand::Next => {
-                            self.advance_track(1);
+                            tasks.push(self.advance_track(1));
                         }
                         MprisCommand::Previous => {
-                            self.advance_track(-1);
+                            tasks.push(self.advance_track(-1));
                         }
                         MprisCommand::Stop => {
                             self.audio.send(AudioCommand::Stop);
@@ -349,7 +338,7 @@ impl AppState {
                     }
                 }
 
-                Task::none()
+                Task::batch(tasks)
             }
 
             Message::CheckTheme => {
@@ -453,9 +442,54 @@ impl AppState {
         .into()
     }
 
-    fn advance_track(&mut self, delta: i32) {
+    /// Inicia a reprodução de `track`: dispara o áudio imediatamente e agenda
+    /// o carregamento da capa fora da thread de UI.
+    fn start_playback(&mut self, track: Track) -> Task<Message> {
+        let path = track.path.clone();
+        self.audio.send(AudioCommand::Play(path.clone()));
+        self.audio.send(AudioCommand::SetVolume(self.volume));
+        self.current_track = Some(track);
+        self.playback_state = PlaybackState::Playing;
+        self.position = Duration::ZERO;
+        self.notify_mpris_track(PlaybackStatus::Playing);
+        load_cover_task(path)
+    }
+
+    /// Avanço automático ao terminar a faixa: em modo sequencial, para no fim
+    /// da fila em vez de reiniciá-la; em shuffle, sorteia a próxima.
+    fn advance_auto(&mut self) -> Task<Message> {
         if self.queue.is_empty() {
-            return;
+            return Task::none();
+        }
+        if self.shuffle {
+            return self.advance_track(1);
+        }
+        let current_idx = self
+            .current_track
+            .as_ref()
+            .and_then(|ct| self.queue.iter().position(|t| t.id == ct.id));
+        match current_idx {
+            Some(i) if i + 1 < self.queue.len() => {
+                let track = self.queue[i + 1].clone();
+                self.start_playback(track)
+            }
+            Some(_) => {
+                self.audio.send(AudioCommand::Stop);
+                self.playback_state = PlaybackState::Stopped;
+                self.position = Duration::ZERO;
+                self.send_mpris(MprisUpdate::Status(PlaybackStatus::Stopped));
+                Task::none()
+            }
+            None => {
+                let track = self.queue[0].clone();
+                self.start_playback(track)
+            }
+        }
+    }
+
+    fn advance_track(&mut self, delta: i32) -> Task<Message> {
+        if self.queue.is_empty() {
+            return Task::none();
         }
 
         let next_idx = if self.shuffle {
@@ -496,18 +530,25 @@ impl AppState {
         };
 
         if let Some(track) = self.queue.get(next_idx).cloned() {
-            let cover_data = load_cover(&track.path);
-            let track = Track {
-                cover_data,
-                ..track
-            };
-            self.audio.send(AudioCommand::Play(track.path.clone()));
-            self.current_track = Some(track);
-            self.playback_state = PlaybackState::Playing;
-            self.position = Duration::ZERO;
-            self.notify_mpris_track(PlaybackStatus::Playing);
+            self.start_playback(track)
+        } else {
+            Task::none()
         }
     }
+}
+
+/// Carrega a capa de `path` em uma thread de bloqueio e devolve `CoverLoaded`.
+fn load_cover_task(path: PathBuf) -> Task<Message> {
+    Task::perform(
+        async move {
+            let p = path.clone();
+            let cover = tokio::task::spawn_blocking(move || load_cover(&path))
+                .await
+                .unwrap_or(None);
+            (p, cover)
+        },
+        |(path, cover)| Message::CoverLoaded(path, cover),
+    )
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
