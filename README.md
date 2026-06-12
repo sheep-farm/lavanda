@@ -23,6 +23,7 @@ A native Wayland music player written in Rust, built for [Omarchy](https://omarc
 - **Keyboard navigation** — arrow keys move the cursor within sidebar and track list; `←`/`→` switch focus between panels; `Enter` activates; full keyboard-first design
 - **Metadata editor** — press `m` on any track to edit title, artist, album and track number; tags written back to the file via lofty
 - **Play-on-click toggle** — press `i` to switch between immediate playback on click/Enter and cursor-only browse mode
+- **Spectrum visualizer** — FFT bars in the player panel, auto-normalized to the signal level; toggle with `v`
 - **Resizable sidebar** — drag the divider; width is persisted across sessions
 - **Session state** — last selected folder and volume are restored on next launch
 - **MPRIS2** — full D-Bus integration; works with `playerctl`, Waybar `mpris` module, AGS, EWW, etc.
@@ -192,6 +193,7 @@ These work when the lavanda window is focused.
 | `/` | search / filter tracks |
 | `m` | edit metadata of the track under the cursor |
 | `i` | toggle play-on-click (immediate playback vs. browse mode) |
+| `v` | toggle spectrum visualizer |
 | `Ctrl+K` | keybinding reference (this table) |
 | `Escape` | close any overlay |
 
