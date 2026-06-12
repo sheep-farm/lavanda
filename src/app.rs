@@ -73,6 +73,8 @@ pub struct AppState {
 
     pub strings: &'static crate::locale::Strings,
 
+    pub status: Option<String>,
+
     audio: AudioPlayer,
     audio_events: Shared<AudioEvent>,
     mpris_cmds: Shared<MprisCommand>,
@@ -85,7 +87,8 @@ impl AppState {
         let audio_events = Arc::new(Mutex::new(Some(audio.take_events())));
 
         let cfg = crate::config::get();
-        let folders = music_subfolders(&cfg.music_path());
+        let saved = crate::state::load();
+        let folders = music_subfolders(cfg.music_path().as_path());
 
         let (mpris_cmd_tx, mpris_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
         let (mpris_update_tx, mpris_update_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -95,17 +98,42 @@ impl AppState {
         let loaded_theme_name = crate::ui::theme::read_current_theme_name();
         let iced_theme = build_iced_theme();
 
+        // Volume: state.toml overrides config.toml (config is the user default,
+        // state tracks what was actually last used).
+        let volume = saved.volume.unwrap_or(cfg.volume).clamp(0.0, 1.0);
+
+        // Restore last folder only if it still exists and is still in the list.
+        let selected_folder = saved
+            .last_folder
+            .filter(|p| p.exists() && folders.contains(p));
+
+        let initial_task = if let Some(ref path) = selected_folder {
+            let path = path.clone();
+            Task::perform(
+                async move {
+                    let p = path.clone();
+                    let tracks = tokio::task::spawn_blocking(move || scan_folder(&path))
+                        .await
+                        .unwrap_or_default();
+                    (p, tracks)
+                },
+                |(path, tracks)| Message::FolderScanned(path, tracks),
+            )
+        } else {
+            Task::none()
+        };
+
         let state = AppState {
             playback_state: PlaybackState::Stopped,
             current_track: None,
             queue: Vec::new(),
             position: Duration::ZERO,
             duration: Duration::ZERO,
-            volume: cfg.volume.clamp(0.0, 1.0),
+            volume,
             shuffle: cfg.shuffle,
             repeat: cfg.repeat,
             folders,
-            selected_folder: None,
+            selected_folder,
             tracks: Vec::new(),
             folder_cache: HashMap::new(),
             sidebar_width: load_sidebar_width(),
@@ -113,13 +141,21 @@ impl AppState {
             iced_theme,
             loaded_theme_name,
             strings: crate::locale::get(),
+            status: None,
             audio,
             audio_events,
             mpris_cmds,
             mpris_update_tx,
         };
 
-        (state, Task::none())
+        (state, initial_task)
+    }
+
+    fn persist_state(&self) {
+        crate::state::save(&crate::state::SavedState {
+            volume: Some(self.volume),
+            last_folder: self.selected_folder.clone(),
+        });
     }
 
     fn send_mpris(&self, update: MprisUpdate) {
@@ -164,6 +200,7 @@ impl AppState {
                 if self.selected_folder.as_ref() == Some(&path) {
                     self.tracks = tracks;
                 }
+                self.persist_state();
                 Task::none()
             }
 
@@ -237,6 +274,7 @@ impl AppState {
                 self.volume = v;
                 self.audio.send(AudioCommand::SetVolume(v));
                 self.send_mpris(MprisUpdate::Volume(v as f64));
+                self.persist_state();
                 Task::none()
             }
 
@@ -301,7 +339,8 @@ impl AppState {
                     }
                 }
                 AudioEvent::Error(e) => {
-                    eprintln!("Erro de áudio: {e}");
+                    eprintln!("Audio error: {e}");
+                    self.status = Some(e);
                     Task::none()
                 }
                 AudioEvent::Playing => {
@@ -366,7 +405,7 @@ impl AppState {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let main = column![
+        let mut main = column![
             self.header_view(),
             views::player::view(self),
             views::library::view(self),
@@ -374,6 +413,10 @@ impl AppState {
         .spacing(0)
         .width(Length::Fill)
         .height(Length::Fill);
+
+        if let Some(ref msg) = self.status {
+            main = main.push(status_bar_view(msg));
+        }
 
         container(main)
             .style(|_: &Theme| iced::widget::container::Style {
@@ -472,7 +515,9 @@ impl AppState {
         self.current_track = Some(track);
         self.playback_state = PlaybackState::Playing;
         self.position = Duration::ZERO;
+        self.status = None;
         self.notify_mpris_track(PlaybackStatus::Playing);
+        self.persist_state();
         load_cover_task(path)
     }
 
@@ -558,6 +603,14 @@ impl AppState {
     }
 }
 
+fn status_bar_view(msg: &str) -> Element<'_, Message> {
+    container(text(msg).color(theme::red()).size(12))
+        .style(theme::header)
+        .width(Length::Fill)
+        .padding([4, 16])
+        .into()
+}
+
 /// Converte um receptor `mpsc` (tomado uma única vez do holder) em um stream de
 /// `Message`, fonte de uma subscription dirigida por canal.
 fn channel_stream<T>(holder: Shared<T>, map: fn(T) -> Message) -> impl Stream<Item = Message>
@@ -592,16 +645,43 @@ fn load_cover_task(path: PathBuf) -> Task<Message> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn music_subfolders(music_dir: &PathBuf) -> Vec<PathBuf> {
-    let mut folders: Vec<PathBuf> = std::fs::read_dir(music_dir)
+fn music_subfolders(music_dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut subdirs: Vec<PathBuf> = std::fs::read_dir(music_dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
         .map(|e| e.path())
         .collect();
-    folders.sort();
-    folders
+    subdirs.sort();
+
+    // Include the root dir itself when it contains audio files directly
+    // (flat ~/Music layout — no artist/album subdirectories).
+    if dir_has_audio(music_dir) {
+        let mut all = vec![music_dir.to_path_buf()];
+        all.extend(subdirs);
+        all
+    } else {
+        subdirs
+    }
+}
+
+const AUDIO_EXTENSIONS: &[&str] = &[
+    "mp3", "flac", "ogg", "opus", "wav", "aac", "m4a", "wma", "aiff",
+];
+
+fn dir_has_audio(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| {
+            e.path()
+                .extension()
+                .and_then(|x| x.to_str())
+                .map(|x| AUDIO_EXTENSIONS.contains(&x.to_lowercase().as_str()))
+                .unwrap_or(false)
+        })
 }
 
 fn sidebar_width_path() -> PathBuf {

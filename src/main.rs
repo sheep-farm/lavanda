@@ -3,6 +3,7 @@ mod audio;
 mod config;
 mod library;
 mod locale;
+mod state;
 mod ui;
 
 fn main() -> iced::Result {

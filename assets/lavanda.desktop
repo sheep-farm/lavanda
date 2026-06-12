@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=lavanda
+GenericName=Music Player
+Comment=Native Wayland music player with Catppuccin theme
+Exec=lavanda
+Icon=audio-x-generic
+Type=Application
+Categories=AudioVideo;Audio;Music;Player;
+Terminal=false
+Keywords=music;audio;player;wayland;
