@@ -78,7 +78,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
                 state.repeat,
             ),
         ]
-        .width(Length::FillPortion(3))
+        .width(Length::FillPortion(5))
         .spacing(0),
         Space::with_width(16),
         spectrum::spectrum_view(&state.spectrum),

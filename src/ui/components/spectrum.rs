@@ -28,7 +28,7 @@ impl canvas::Program<Message> for SpectrumCanvas {
         }
 
         let slot = bounds.width / n as f32;
-        let bar_w = (slot * 0.45).max(1.0);
+        let bar_w = (slot * 0.25).max(1.0);
         let center_y = bounds.height / 2.0;
 
         for (i, &amp) in self.bins.iter().enumerate() {
@@ -54,7 +54,7 @@ pub fn spectrum_view(bins: &[f32]) -> Element<'_, Message> {
         bins: bins.to_vec(),
         accent: theme::accent(),
     })
-    .width(Length::FillPortion(1))
+    .width(Length::FillPortion(3))
     .height(Length::Fill)
     .into()
 }
