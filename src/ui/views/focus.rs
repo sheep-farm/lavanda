@@ -70,8 +70,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         container(track_info).center_x(Length::Fill),
         Space::with_height(20),
         container(progress::progress_bar(state.position, state.duration))
-            .width(Length::Fill)
-            .padding([0, 96]),
+            .width(Length::Fill),
         Space::with_height(12),
         container(controls::playback_controls(
             &state.playback_state,
