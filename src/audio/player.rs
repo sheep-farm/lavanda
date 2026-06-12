@@ -52,6 +52,7 @@ pub enum AudioEvent {
 
 pub struct AudioPlayer {
     pub cmd_tx: mpsc::UnboundedSender<AudioCommand>,
+    pub viz_buf: Arc<Mutex<VecDeque<f32>>>,
     event_rx: Option<mpsc::UnboundedReceiver<AudioEvent>>,
 }
 
@@ -59,11 +60,14 @@ impl AudioPlayer {
     pub fn spawn() -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let viz_buf: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::new()));
 
-        std::thread::spawn(move || audio_thread(cmd_rx, event_tx));
+        let viz = viz_buf.clone();
+        std::thread::spawn(move || audio_thread(cmd_rx, event_tx, viz));
 
         AudioPlayer {
             cmd_tx,
+            viz_buf,
             event_rx: Some(event_rx),
         }
     }
@@ -84,6 +88,7 @@ impl AudioPlayer {
 fn audio_thread(
     mut cmd_rx: mpsc::UnboundedReceiver<AudioCommand>,
     event_tx: mpsc::UnboundedSender<AudioEvent>,
+    viz_buf: Arc<Mutex<VecDeque<f32>>>,
 ) {
     let host = cpal::default_host();
     let device = match host.default_output_device() {
@@ -205,9 +210,10 @@ fn audio_thread(
                         let tx = event_tx.clone();
                         let vol = shared_vol.clone();
                         let flag = new_cancel;
+                        let viz = viz_buf.clone();
 
                         tokio::task::spawn_blocking(move || {
-                            match decode_file(&path, pcm2, tx.clone(), vol, flag, Some(pos)) {
+                            match decode_file(&path, pcm2, tx.clone(), vol, flag, viz, Some(pos)) {
                                 Ok(true) => {
                                     let _ = tx.send(AudioEvent::TrackEnded);
                                 }
@@ -235,9 +241,10 @@ fn audio_thread(
                     let tx = event_tx.clone();
                     let vol = shared_vol.clone();
                     let flag = new_cancel;
+                    let viz = viz_buf.clone();
 
                     tokio::task::spawn_blocking(move || {
-                        match decode_file(&path, pcm2, tx.clone(), vol, flag, None) {
+                        match decode_file(&path, pcm2, tx.clone(), vol, flag, viz, None) {
                             Ok(true) => {
                                 let _ = tx.send(AudioEvent::TrackEnded);
                             }
@@ -268,6 +275,8 @@ fn fill_output(output: &mut [f32], pcm: &Arc<Mutex<VecDeque<f32>>>, paused: &Arc
 
 // ── Decode ───────────────────────────────────────────────────────────────────
 
+const VIZ_BUF_CAP: usize = 8192;
+
 /// Retorna Ok(true) se a faixa terminou normalmente, Ok(false) se foi cancelada.
 fn decode_file(
     path: &PathBuf,
@@ -275,6 +284,7 @@ fn decode_file(
     event_tx: mpsc::UnboundedSender<AudioEvent>,
     volume: Arc<Mutex<f32>>,
     cancel: Arc<AtomicBool>,
+    viz_buf: Arc<Mutex<VecDeque<f32>>>,
     seek_to: Option<Duration>,
 ) -> Result<bool> {
     let file = std::fs::File::open(path)?;
@@ -388,6 +398,18 @@ fn decode_file(
         } else {
             stereo
         };
+
+        // Downmix to mono for spectrum visualizer
+        {
+            let mut vb = viz_buf.lock().unwrap();
+            for ch in samples.chunks(2) {
+                let mono = (ch[0] + ch.get(1).copied().unwrap_or(ch[0])) * 0.5;
+                vb.push_back(mono);
+            }
+            while vb.len() > VIZ_BUF_CAP {
+                vb.pop_front();
+            }
+        }
 
         sample_count += samples.len() as u64 / 2;
 

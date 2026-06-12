@@ -38,6 +38,9 @@ serde = { version = "1", features = ["derive"] }
 # Gerador de números aleatórios (shuffle)
 rand = "0.8"
 
+# FFT (visualizador de espectro)
+rustfft = "6"
+
 [profile.release]
 opt-level = 3
 lto = true

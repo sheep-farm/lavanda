@@ -2,7 +2,7 @@ use iced::widget::{column, container, image, row, text, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{AppState, Message};
-use crate::ui::components::{controls, progress};
+use crate::ui::components::{controls, progress, spectrum};
 use crate::ui::{icons, theme};
 
 pub fn view(state: &AppState) -> Element<'_, Message> {
@@ -80,6 +80,8 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         ]
         .width(Length::Fill)
         .spacing(0),
+        Space::with_width(16),
+        spectrum::spectrum_view(&state.spectrum),
     ]
     .spacing(0)
     .align_y(Alignment::Center)

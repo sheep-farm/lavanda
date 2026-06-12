@@ -102,6 +102,8 @@ pub enum Message {
     SearchInput(String),
     ToggleHelp,
 
+    SpectrumData(Vec<f32>),
+
     Audio(AudioEvent),
     Mpris(MprisCommand),
     CheckTheme,
@@ -143,8 +145,11 @@ pub struct AppState {
     pub search_active: bool,
     pub help_visible: bool,
 
+    pub spectrum: Vec<f32>,
+
     audio: AudioPlayer,
     audio_events: Shared<AudioEvent>,
+    spectrum_rx: Shared<Vec<f32>>,
     mpris_cmds: Shared<MprisCommand>,
     mpris_update_tx: tokio::sync::mpsc::UnboundedSender<MprisUpdate>,
 }
@@ -153,6 +158,10 @@ impl AppState {
     fn new() -> (Self, Task<Message>) {
         let mut audio = AudioPlayer::spawn();
         let audio_events = Arc::new(Mutex::new(Some(audio.take_events())));
+
+        let (spectrum_tx, spectrum_rx) = tokio::sync::mpsc::unbounded_channel();
+        crate::audio::spectrum::launch(audio.viz_buf.clone(), spectrum_tx);
+        let spectrum_rx = Arc::new(Mutex::new(Some(spectrum_rx)));
 
         let cfg = crate::config::get();
         let saved = crate::state::load();
@@ -223,8 +232,10 @@ impl AppState {
             search_query: String::new(),
             search_active: false,
             help_visible: false,
+            spectrum: vec![0.0; crate::audio::spectrum::NUM_BARS],
             audio,
             audio_events,
+            spectrum_rx,
             mpris_cmds,
             mpris_update_tx,
         };
@@ -291,6 +302,7 @@ impl AppState {
                     | Message::ActivateCursor
                     | Message::FocusNext
                     | Message::FocusPrev
+                    | Message::SpectrumData(_)
             )
         {
             return Task::none();
@@ -316,6 +328,7 @@ impl AppState {
                     | Message::VolumeChanged(_)
                     | Message::FocusNext
                     | Message::FocusPrev
+                    | Message::SpectrumData(_)
             )
         {
             return Task::none();
@@ -690,6 +703,13 @@ impl AppState {
             Message::FocusNext => iced::widget::focus_next(),
             Message::FocusPrev => iced::widget::focus_previous(),
 
+            Message::SpectrumData(bins) => {
+                for (a, b) in self.spectrum.iter_mut().zip(bins.iter()) {
+                    *a = *a * 0.55 + b * 0.45;
+                }
+                Task::none()
+            }
+
             Message::Audio(event) => match event {
                 AudioEvent::Progress { position, duration } => {
                     self.position = position;
@@ -824,6 +844,10 @@ impl AppState {
             Subscription::run_with_id(
                 "mpris-cmds",
                 channel_stream(self.mpris_cmds.clone(), Message::Mpris),
+            ),
+            Subscription::run_with_id(
+                "spectrum",
+                channel_stream(self.spectrum_rx.clone(), Message::SpectrumData),
             ),
             iced::time::every(Duration::from_secs(3)).map(|_| Message::CheckTheme),
             iced::keyboard::on_key_press(|key, mods| {
