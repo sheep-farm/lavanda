@@ -95,7 +95,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
                 container(spectrum::spectrum_view(
                     &state.spectrum,
                     Length::Fixed(320.0),
-                    Length::Fixed(56.0),
+                    Length::Fixed(80.0),
                 ))
                 .center_x(Length::Fill),
             );
