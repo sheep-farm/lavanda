@@ -54,7 +54,7 @@ pub fn spectrum_view(bins: &[f32]) -> Element<'_, Message> {
         bins: bins.to_vec(),
         accent: theme::accent(),
     })
-    .width(Length::Fixed(220.0))
-    .height(Length::Fixed(180.0))
+    .width(Length::FillPortion(1))
+    .height(Length::Fill)
     .into()
 }
