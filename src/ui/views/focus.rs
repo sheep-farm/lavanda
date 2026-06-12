@@ -1,4 +1,4 @@
-use iced::widget::{column, container, image, text, Space};
+use iced::widget::{column, container, image, row, text, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{AppState, Message};
@@ -69,9 +69,13 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         Space::with_height(24),
         container(track_info).center_x(Length::Fill),
         Space::with_height(20),
-        container(progress::progress_bar(state.position, state.duration))
-            .width(Length::Fixed(320.0))
-            .center_x(Length::Fill),
+        row![
+            Space::with_width(Length::FillPortion(1)),
+            container(progress::progress_bar(state.position, state.duration))
+                .width(Length::FillPortion(1)),
+            Space::with_width(Length::FillPortion(1)),
+        ]
+        .width(Length::Fill),
         Space::with_height(12),
         container(controls::playback_controls(
             &state.playback_state,
