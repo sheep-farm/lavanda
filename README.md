@@ -9,15 +9,18 @@ A native Wayland music player written in Rust, built for [Omarchy](https://omarc
 ## Features
 
 - **Audio formats** — MP3, FLAC, OGG, Opus, WAV, AAC, M4A, AIFF and more via [Symphonia](https://github.com/pdeljanov/Symphonia)
-- **Folder-based library** — navigates your `~/Music` subdirectory structure as-is; no forced re-organisation
-- **Incremental scanner** — only re-indexes files that changed (mtime cache); detects renames and deletions
+- **Folder-based library** — `~/Music` subdirectories shown in the sidebar; flat layout (audio files directly in `~/Music`) also supported
+- **On-demand scan** — each folder is scanned when selected; results cached for the session, nothing written to disk
+- **Album art** — embedded cover tag displayed; falls back to `cover.jpg`, `Cover.jpg`, `folder.jpg` (and `.png`, `.webp` variants) in the same directory
 - **Real seek** — click anywhere on the progress bar to jump
 - **Dynamic volume** — slider takes effect immediately, mid-playback
-- **Shuffle & repeat** — per-session, no playlist required
-- **Album art** — embedded cover displayed in the player panel
+- **Shuffle & repeat** — per-session
+- **Resizable sidebar** — drag the divider; width is persisted across sessions
+- **Session state** — last selected folder and volume are restored on next launch
 - **MPRIS2** — full D-Bus integration; works with `playerctl`, Waybar `mpris` module, AGS, EWW, etc.
 - **Nerd Font icons** — Font Awesome tier-1 codepoints (universal across any Nerd Font)
 - **Live Omarchy theming** — reads `~/.config/omarchy/current/theme.name` and updates the palette within 3 seconds of a theme switch; no restart required
+- **i18n** — English, Portuguese (pt_BR) and Spanish; auto-detected from `$LANG`
 
 ---
 
@@ -41,7 +44,13 @@ A native Wayland music player written in Rust, built for [Omarchy](https://omarc
 git clone https://github.com/sheep-farm/lavanda
 cd lavanda
 cargo build --release
-./target/release/lavanda
+install -Dm755 target/release/lavanda ~/.local/bin/lavanda
+```
+
+### Desktop entry
+
+```bash
+cp assets/lavanda.desktop ~/.local/share/applications/
 ```
 
 ### With cargo install
@@ -54,46 +63,52 @@ cargo install --git https://github.com/sheep-farm/lavanda
 
 ## Configuration
 
-lavanda generates `~/.config/lavanda/config.toml` on first run with all options commented and set to their defaults. Edit it with any text editor; changes take effect on next launch.
+lavanda generates `~/.config/lavanda/config.toml` on first run with all options set to their defaults.
 
 ```toml
 # ~/.config/lavanda/config.toml
 
-# Path to your music library. Subdirectories are shown as folders in the sidebar.
+# Path to your music library. Subdirectories appear as folders in the sidebar.
 music_dir = "~/Music"
 
 # Initial volume (0.0 = mute, 1.0 = 100%)
 volume = 0.8
 
-# Start the session with shuffle enabled
+# Start with shuffle enabled
 shuffle = false
 
-# Start the session with repeat enabled
+# Start with repeat enabled
 repeat = false
 
-# Interface language. Options: "auto", "en", "pt_BR", "es"
-# "auto" detects from $LANG
+# Interface language: "auto", "en", "pt_BR", "es"
 language = "auto"
 
-# Seek step in seconds for the ← → arrow keys
+# Seek step in seconds for ← → arrow keys
 seek_step = 5
 
 # Volume delta per + / - keypress
 volume_step = 0.05
 ```
 
+Session state (last folder, volume) is saved separately at `~/.config/lavanda/state.toml` and restored automatically on next launch.
+
 ---
 
 ## Music library
 
-lavanda scans `~/Music` on startup. Subdirectories are shown as folders in the sidebar — the structure you already have is respected.
+lavanda scans `~/Music` on demand. Subdirectories appear as folders in the sidebar. Audio files placed directly in `~/Music` (flat layout) are also supported — the root directory is included as the first sidebar entry.
 
 **Tag fallback hierarchy:**
-- If a file has no artist tag → parent folder name is used as artist
-- If a file has no album tag → immediate parent folder name is used as album
-- If a file has no title tag → filename stem is used
+- No artist tag → parent folder name
+- No album tag → immediate parent folder name
+- No title tag → filename stem
 
-The library database is stored at `~/.local/share/lavanda/lavanda.db`. Delete it to force a full rescan.
+**"Playlists"** are handled via the filesystem: create a symlink directory pointing at any tracks you want grouped, and lavanda will scan it like any other folder. `WalkDir` follows symlinks transparently.
+
+**Cover art lookup order:**
+1. Embedded tag (CoverFront or Other picture type)
+2. `cover.jpg`, `Cover.jpg`, `cover.png`, `Cover.png`, `cover.webp`, `Cover.webp`
+3. `folder.jpg`, `Folder.jpg`, `folder.png`, `Folder.png`
 
 ---
 
@@ -107,30 +122,13 @@ lavanda reads the active Omarchy theme from `~/.config/omarchy/current/theme.nam
 | `foreground` | primary text |
 | `accent` | accent color (highlights, active elements) |
 | `color8` | muted/overlay color; also used to derive surface shades |
-| `color1`–`color4` | red / green / yellow / blue |
+| `color1` | red (error status bar) |
+| `color2` | green |
 | `color15` | subtext |
 
-Works with all built-in Omarchy themes (Catppuccin, Nord, Gruvbox, Tokyo Night, Rose Pinè, etc.) and custom user themes in `~/.config/omarchy/themes/`.
+Works with all built-in Omarchy themes (Catppuccin, Nord, Gruvbox, Tokyo Night, Rosé Pinè, etc.) and custom user themes in `~/.config/omarchy/themes/`.
 
 ### Waybar integration
-
-For the Waybar `mpris` module to also follow the theme, add an Omarchy `theme-set` hook at `~/.config/omarchy/hooks/theme-set` that regenerates `~/.config/waybar/colors.css` and sends `SIGUSR2` to Waybar. An example hook is shown below — adapt it to the CSS variable names your `style.css` uses:
-
-```bash
-#!/bin/bash
-THEME_NAME="$1"
-COLORS_FILE="$HOME/.config/omarchy/themes/$THEME_NAME/colors.toml"
-[ -f "$COLORS_FILE" ] || COLORS_FILE="$HOME/.local/share/omarchy/themes/$THEME_NAME/colors.toml"
-[ -f "$COLORS_FILE" ] || exit 0
-
-get_color() { grep -E "^$1\s*=" "$COLORS_FILE" | grep -oE '[0-9a-fA-F]{6}' | head -1; }
-
-BG=$(get_color background); FG=$(get_color foreground); ACCENT=$(get_color accent)
-# ... generate your colors.css ...
-pkill -SIGUSR2 waybar 2>/dev/null
-```
-
-Style the module via CSS classes — avoid hardcoded Pango colors in `format`:
 
 ```jsonc
 "mpris": {
@@ -148,12 +146,6 @@ Style the module via CSS classes — avoid hardcoded Pango colors in `format`:
 }
 ```
 
-```css
-/* style.css */
-#mpris         { color: @ACCENT; }
-#mpris.paused  { color: @GRAY0; font-style: italic; }
-```
-
 ---
 
 ## Keybindings
@@ -163,14 +155,14 @@ These work when the lavanda window is focused.
 | Key | Action |
 |---|---|
 | `Space` | play / pause |
-| `→` / `←` | seek +5s / −5s |
+| `→` / `←` | seek forward / backward |
 | `n` / `p` | next / previous track |
 | `s` | toggle shuffle |
 | `r` | toggle repeat |
-| `+` or `=` | volume +5% |
-| `-` | volume −5% |
+| `+` or `=` | volume up |
+| `-` | volume down |
 
-For system-wide controls (lavanda running in background), wire `playerctl` to your compositor. Example for Hyprland:
+For system-wide controls (lavanda running in background), wire `playerctl` to your compositor:
 
 ```ini
 # hyprland.conf
@@ -192,43 +184,40 @@ playerctl -p lavanda metadata
 
 ---
 
-## Font
-
-lavanda uses `JetBrainsMono Nerd Font Mono` by default — the same font used by Omarchy's Waybar. Any Nerd Font will work for the icons; change the family name in `src/ui/icons.rs` if you use a different one.
-
----
-
 ## Architecture
 
 ```
 src/
 ├── main.rs
 ├── app.rs              # iced Application — state, messages, subscriptions
+├── config.rs           # config.toml parsing and defaults
+├── state.rs            # session state persistence (state.toml)
+├── locale.rs           # i18n strings (en, pt_BR, es)
 ├── audio/
-│   ├── player.rs       # symphonia decode + cpal output thread
-│   ├── mpris.rs        # MPRIS2 D-Bus server (mpris-server 0.8)
-│   └── spectrum.rs     # FFT analyser (unused in UI — use cava externally)
+│   ├── player.rs       # symphonia decode + cpal output (dedicated thread)
+│   └── mpris.rs        # MPRIS2 D-Bus server via mpris-server
 ├── library/
-│   ├── scanner.rs      # walkdir + lofty + mtime cache + orphan cleanup
-│   ├── db.rs           # SQLite queries (rusqlite, bundled)
-│   └── models.rs       # Track, Album, Artist, Playlist
+│   ├── scanner.rs      # on-demand folder scan (walkdir + lofty); cover loader
+│   └── models.rs       # Track
 └── ui/
-    ├── theme.rs        # Omarchy theme reader + live palette + container styles
-    ├── icons.rs        # Nerd Font constants + UI font constants
-    ├── views/          # library, player, playlist views
+    ├── theme.rs        # Omarchy theme reader, live palette, container styles
+    ├── icons.rs        # Nerd Font codepoints and UI font constants
+    ├── views/          # library view, player panel
     └── components/     # progress bar, playback controls
 ```
+
+No database. No disk cache. All library data lives in memory for the duration of the session.
 
 ---
 
 ## Status
 
-**0.1.0-beta** — functional for daily use; rough edges remain.
+**0.1.0** — functional for daily use.
 
 Known limitations:
-- Playlists UI exists but drag-and-drop population is not yet implemented
 - Seek accuracy depends on the container format (Symphonia limitation)
-- No gapless playback
+- No gapless playback between tracks
+- Volume set via slider is not persisted on close (use `+`/`-` keys to adjust persistently)
 
 ---
 
