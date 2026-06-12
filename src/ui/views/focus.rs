@@ -70,8 +70,8 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         container(track_info).center_x(Length::Fill),
         Space::with_height(20),
         container(progress::progress_bar(state.position, state.duration))
-            .width(Length::Fill)
-            .padding([0, 64]),
+            .width(Length::Fixed(320.0))
+            .center_x(Length::Fill),
         Space::with_height(12),
         container(controls::playback_controls(
             &state.playback_state,
@@ -90,11 +90,10 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             .push(
                 container(spectrum::spectrum_view(
                     &state.spectrum,
-                    Length::Fill,
+                    Length::Fixed(320.0),
                     Length::Fixed(56.0),
                 ))
-                .width(Length::Fill)
-                .padding([0, 64]),
+                .center_x(Length::Fill),
             );
     }
 
