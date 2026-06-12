@@ -1,4 +1,6 @@
-use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text, Space};
+use iced::widget::{
+    button, column, container, mouse_area, row, scrollable, stack, text, text_input, Space,
+};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{AppState, Focus, Message};
@@ -112,10 +114,54 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
 
     let current_id = state.current_track.as_ref().map(|t| t.id);
     let is_tracklist_focused = state.focus == Focus::TrackList;
+    let visible = state.visible_tracks();
 
-    // Agrupa faixas por álbum mantendo a ordem de inserção
+    let mut rows: Vec<Element<Message>> = Vec::new();
+
+    // Search bar
+    if state.search_active {
+        let bar = container(
+            row![
+                text(crate::ui::icons::ICON_SEARCH)
+                    .font(crate::ui::icons::NERD_FONT_MONO)
+                    .color(theme::overlay0())
+                    .size(13),
+                Space::with_width(6),
+                text_input("Search…", &state.search_query)
+                    .id(iced::widget::text_input::Id::new("search"))
+                    .on_input(Message::SearchInput)
+                    .style(theme::dialog_input)
+                    .size(13)
+                    .padding([4, 8])
+                    .width(Length::Fill),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .padding([6, 12]),
+        )
+        .style(theme::album_header)
+        .width(Length::Fill);
+
+        rows.push(bar.into());
+
+        if visible.is_empty() {
+            rows.push(
+                container(text("No results").color(theme::overlay0()).size(14))
+                    .center_x(Length::Fill)
+                    .padding([24, 0])
+                    .width(Length::Fill)
+                    .into(),
+            );
+            return container(scrollable(column(rows).spacing(1)))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
+        }
+    }
+
+    // Group visible tracks by album
     let mut groups: Vec<(String, Vec<&crate::library::models::Track>)> = Vec::new();
-    for track in &state.tracks {
+    for track in &visible {
         if let Some(last) = groups.last_mut() {
             if last.0 == track.album {
                 last.1.push(track);
@@ -125,29 +171,29 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
         groups.push((track.album.clone(), vec![track]));
     }
 
-    let mut rows: Vec<Element<Message>> = Vec::new();
     let mut track_idx: usize = 0;
 
     for (album_name, tracks) in groups.into_iter() {
-        let n = tracks.len();
-        let header = container(
-            row![
-                text(album_name)
-                    .color(theme::accent())
-                    .size(13)
-                    .font(crate::ui::icons::UI_FONT_BOLD),
-                Space::with_width(Length::Fill),
-                text(state.strings.track_count(n))
-                    .color(theme::overlay0())
-                    .size(11),
-            ]
-            .align_y(Alignment::Center)
-            .padding([6, 12]),
-        )
-        .style(theme::album_header)
-        .width(Length::Fill);
-
-        rows.push(header.into());
+        if !state.search_active {
+            let n = tracks.len();
+            let header = container(
+                row![
+                    text(album_name)
+                        .color(theme::accent())
+                        .size(13)
+                        .font(crate::ui::icons::UI_FONT_BOLD),
+                    Space::with_width(Length::Fill),
+                    text(state.strings.track_count(n))
+                        .color(theme::overlay0())
+                        .size(11),
+                ]
+                .align_y(Alignment::Center)
+                .padding([6, 12]),
+            )
+            .style(theme::album_header)
+            .width(Length::Fill);
+            rows.push(header.into());
+        }
 
         for track in tracks.into_iter() {
             let is_current = current_id == Some(track.id);
@@ -205,7 +251,9 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
             track_idx += 1;
         }
 
-        rows.push(Space::with_height(8).into());
+        if !state.search_active {
+            rows.push(Space::with_height(8).into());
+        }
     }
 
     container(scrollable(column(rows).spacing(1)))

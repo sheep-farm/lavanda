@@ -36,3 +36,4 @@ pub const ICON_SHUFFLE: &str = "\u{f074}"; //
 pub const ICON_REPEAT: &str = "\u{f021}"; //
 pub const ICON_VOL_UP: &str = "\u{f028}"; //
 pub const ICON_MUSIC: &str = "\u{f001}"; //
+pub const ICON_SEARCH: &str = "\u{f002}"; //

@@ -98,6 +98,10 @@ pub enum Message {
     MetadataSaved(Result<Track, String>),
     CancelEdit,
 
+    SearchToggle,
+    SearchInput(String),
+    ToggleHelp,
+
     Audio(AudioEvent),
     Mpris(MprisCommand),
     CheckTheme,
@@ -135,6 +139,9 @@ pub struct AppState {
 
     pub status: Option<String>,
     pub edit_state: Option<EditState>,
+    pub search_query: String,
+    pub search_active: bool,
+    pub help_visible: bool,
 
     audio: AudioPlayer,
     audio_events: Shared<AudioEvent>,
@@ -213,6 +220,9 @@ impl AppState {
             strings: crate::locale::get(),
             status: None,
             edit_state: None,
+            search_query: String::new(),
+            search_active: false,
+            help_visible: false,
             audio,
             audio_events,
             mpris_cmds,
@@ -240,9 +250,25 @@ impl AppState {
                 artist: track.artist.clone(),
                 album: track.album.clone(),
                 duration_us: track.duration.as_micros() as i64,
+                art_url: None,
             });
         }
         self.send_mpris(MprisUpdate::Status(status));
+    }
+
+    pub fn visible_tracks(&self) -> Vec<&Track> {
+        if self.search_query.is_empty() {
+            return self.tracks.iter().collect();
+        }
+        let q = self.search_query.to_lowercase();
+        self.tracks
+            .iter()
+            .filter(|t| {
+                t.title.to_lowercase().contains(&q)
+                    || t.artist.to_lowercase().contains(&q)
+                    || t.album.to_lowercase().contains(&q)
+            })
+            .collect()
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -269,6 +295,32 @@ impl AppState {
         {
             return Task::none();
         }
+
+        // While search is active, block playback shortcuts but keep navigation.
+        if self.search_active
+            && !matches!(
+                message,
+                Message::SearchInput(_)
+                    | Message::SearchToggle
+                    | Message::CancelEdit
+                    | Message::MoveCursor(_)
+                    | Message::ActivateCursor
+                    | Message::TrackClicked(..)
+                    | Message::SwitchFocus(_)
+                    | Message::Audio(_)
+                    | Message::Mpris(_)
+                    | Message::CheckTheme
+                    | Message::SidebarDragStart
+                    | Message::SidebarDragMove(_)
+                    | Message::SidebarDragEnd
+                    | Message::VolumeChanged(_)
+                    | Message::FocusNext
+                    | Message::FocusPrev
+            )
+        {
+            return Task::none();
+        }
+
         match message {
             Message::SelectFolder(path) => {
                 if let Some(idx) = self.folders.iter().position(|f| f == &path) {
@@ -305,7 +357,24 @@ impl AppState {
             Message::CoverLoaded(path, cover) => {
                 if let Some(track) = &mut self.current_track {
                     if track.path == path {
-                        track.cover_data = cover;
+                        track.cover_data = cover.clone();
+                        if let Some(data) = cover {
+                            let cp = cache_cover_path();
+                            if let Some(dir) = cp.parent() {
+                                std::fs::create_dir_all(dir).ok();
+                            }
+                            if std::fs::write(&cp, &data).is_ok() {
+                                let art_url = format!("file://{}", cp.display());
+                                let t = track.clone();
+                                self.send_mpris(MprisUpdate::Metadata {
+                                    title: t.title,
+                                    artist: t.artist,
+                                    album: t.album,
+                                    duration_us: t.duration.as_micros() as i64,
+                                    art_url: Some(art_url),
+                                });
+                            }
+                        }
                     }
                 }
                 Task::none()
@@ -359,6 +428,7 @@ impl AppState {
                 self.volume = v;
                 self.audio.send(AudioCommand::SetVolume(v));
                 self.send_mpris(MprisUpdate::Volume(v as f64));
+                self.persist_state();
                 Task::none()
             }
 
@@ -415,7 +485,7 @@ impl AppState {
                         }
                     }
                     Focus::TrackList => {
-                        let len = self.tracks.len();
+                        let len = self.visible_tracks().len();
                         if len > 0 {
                             self.track_cursor =
                                 (self.track_cursor as i32 + delta).rem_euclid(len as i32) as usize;
@@ -438,7 +508,11 @@ impl AppState {
                         }
                     }
                     Focus::TrackList => {
-                        if let Some(track) = self.tracks.get(self.track_cursor).cloned() {
+                        let track = self
+                            .visible_tracks()
+                            .get(self.track_cursor)
+                            .map(|t| (*t).clone());
+                        if let Some(track) = track {
                             self.queue = self.tracks.clone();
                             self.start_playback(track)
                         } else {
@@ -574,7 +648,42 @@ impl AppState {
             }
 
             Message::CancelEdit => {
-                self.edit_state = None;
+                if self.edit_state.is_some() {
+                    self.edit_state = None;
+                } else if self.search_active {
+                    self.search_active = false;
+                    self.search_query.clear();
+                    self.track_cursor = 0;
+                } else {
+                    self.help_visible = false;
+                }
+                Task::none()
+            }
+
+            Message::SearchToggle => {
+                self.search_active = !self.search_active;
+                if self.search_active {
+                    self.search_query.clear();
+                    self.track_cursor = 0;
+                    self.focus = Focus::TrackList;
+                    return iced::widget::text_input::focus(iced::widget::text_input::Id::new(
+                        "search",
+                    ));
+                } else {
+                    self.search_query.clear();
+                    self.track_cursor = 0;
+                }
+                Task::none()
+            }
+
+            Message::SearchInput(q) => {
+                self.search_query = q;
+                self.track_cursor = 0;
+                Task::none()
+            }
+
+            Message::ToggleHelp => {
+                self.help_visible = !self.help_visible;
                 Task::none()
             }
 
@@ -688,14 +797,20 @@ impl AppState {
             main = main.push(status_bar_view(msg));
         }
 
-        container(main)
+        let base: Element<Message> = container(main)
             .style(|_: &Theme| iced::widget::container::Style {
                 background: Some(iced::Background::Color(theme::base())),
                 ..Default::default()
             })
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .into();
+
+        if let Some(overlay) = views::help::view(self) {
+            iced::widget::stack![base, overlay].into()
+        } else {
+            base
+        }
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -735,6 +850,8 @@ impl AppState {
                     Key::Character(ref c) => match c.as_str() {
                         "i" | "I" => Some(Message::TogglePlayOnClick),
                         "m" | "M" => Some(Message::EditCursorTrack),
+                        "/" => Some(Message::SearchToggle),
+                        "?" => Some(Message::ToggleHelp),
                         "n" | "N" => Some(Message::NextTrack),
                         "p" | "P" => Some(Message::PreviousTrack),
                         "s" | "S" => Some(Message::ToggleShuffle),
@@ -806,6 +923,7 @@ impl AppState {
         let path = track.path.clone();
         self.audio.send(AudioCommand::Play(path.clone()));
         self.audio.send(AudioCommand::SetVolume(self.volume));
+        send_track_notification(&track.title, &track.artist);
         self.current_track = Some(track);
         self.playback_state = PlaybackState::Playing;
         self.position = Duration::ZERO;
@@ -935,6 +1053,24 @@ fn load_cover_task(path: PathBuf) -> Task<Message> {
         },
         |(path, cover)| Message::CoverLoaded(path, cover),
     )
+}
+
+fn cache_cover_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    std::path::PathBuf::from(home).join(".cache/lavanda/cover.jpg")
+}
+
+fn send_track_notification(title: &str, artist: &str) {
+    std::process::Command::new("notify-send")
+        .args([
+            "lavanda",
+            &format!("{title} — {artist}"),
+            "--icon=audio-x-generic",
+            "--expire-time=3000",
+            "--urgency=low",
+        ])
+        .spawn()
+        .ok();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

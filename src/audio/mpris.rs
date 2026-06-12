@@ -18,6 +18,7 @@ pub enum MprisUpdate {
         artist: String,
         album: String,
         duration_us: i64,
+        art_url: Option<String>,
     },
     Status(PlaybackStatus),
     Volume(f64),
@@ -97,14 +98,17 @@ pub fn launch(
                         artist,
                         album,
                         duration_us,
+                        art_url,
                     } => {
-                        let metadata = Metadata::builder()
+                        let mut builder = Metadata::builder()
                             .title(title)
                             .artist([artist])
                             .album(album)
-                            .length(Time::from_micros(duration_us))
-                            .build();
-                        player.set_metadata(metadata).await.ok();
+                            .length(Time::from_micros(duration_us));
+                        if let Some(url) = art_url {
+                            builder = builder.art_url(url);
+                        }
+                        player.set_metadata(builder.build()).await.ok();
                     }
                     MprisUpdate::Status(s) => {
                         player.set_playback_status(s).await.ok();
