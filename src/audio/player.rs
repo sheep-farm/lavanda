@@ -52,7 +52,7 @@ pub enum AudioEvent {
 
 pub struct AudioPlayer {
     pub cmd_tx: mpsc::UnboundedSender<AudioCommand>,
-    pub event_rx: mpsc::UnboundedReceiver<AudioEvent>,
+    event_rx: Option<mpsc::UnboundedReceiver<AudioEvent>>,
 }
 
 impl AudioPlayer {
@@ -62,11 +62,20 @@ impl AudioPlayer {
 
         std::thread::spawn(move || audio_thread(cmd_rx, event_tx));
 
-        AudioPlayer { cmd_tx, event_rx }
+        AudioPlayer {
+            cmd_tx,
+            event_rx: Some(event_rx),
+        }
     }
 
     pub fn send(&self, cmd: AudioCommand) {
         let _ = self.cmd_tx.send(cmd);
+    }
+
+    /// Entrega o receptor de eventos uma única vez, para ser consumido pela
+    /// subscription dirigida por canal.
+    pub fn take_events(&mut self) -> mpsc::UnboundedReceiver<AudioEvent> {
+        self.event_rx.take().expect("event receiver already taken")
     }
 }
 
@@ -302,6 +311,10 @@ fn decode_file(
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| anyhow!("Decoder: {e}"))?;
 
+    // Emite Progress no máximo a cada 250 ms: o suficiente para a barra e o
+    // relógio, sem inundar a UI com um evento por packet (~38/s em MP3).
+    let mut next_emit = Duration::ZERO;
+
     let mut sample_count = if let Some(pos) = seek_to {
         let seek_time = SymphoniaTime {
             seconds: pos.as_secs(),
@@ -380,8 +393,12 @@ fn decode_file(
 
         if let (Some(tb), Some(nf)) = (time_base, n_frames) {
             let position = Duration::from_secs_f64(sample_count as f64 / OUTPUT_RATE as f64);
-            let duration = Duration::from_secs_f64(nf as f64 * tb.numer as f64 / tb.denom as f64);
-            let _ = event_tx.send(AudioEvent::Progress { position, duration });
+            if position >= next_emit {
+                let duration =
+                    Duration::from_secs_f64(nf as f64 * tb.numer as f64 / tb.denom as f64);
+                let _ = event_tx.send(AudioEvent::Progress { position, duration });
+                next_emit = position + Duration::from_millis(250);
+            }
         }
 
         loop {

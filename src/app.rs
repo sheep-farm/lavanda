@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use iced::futures::{SinkExt, Stream};
 use iced::widget::{column, container, row, text, Space};
 use iced::{Alignment, Element, Length, Subscription, Task, Theme};
 use mpris_server::{LoopStatus, PlaybackStatus};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::audio::mpris;
 use crate::audio::{
@@ -13,6 +16,9 @@ use crate::audio::{
 use crate::library::models::Track;
 use crate::library::{load_cover, scan_folder};
 use crate::ui::{theme, views};
+
+/// Receptor compartilhado, consumido uma única vez pela subscription.
+type Shared<T> = Arc<Mutex<Option<UnboundedReceiver<T>>>>;
 
 // ── Mensagens ─────────────────────────────────────────────────────────────────
 
@@ -37,7 +43,8 @@ pub enum Message {
     SidebarDragMove(f32),
     SidebarDragEnd,
 
-    PollAudio,
+    Audio(AudioEvent),
+    Mpris(MprisCommand),
     CheckTheme,
 }
 
@@ -67,13 +74,15 @@ pub struct AppState {
     pub strings: &'static crate::locale::Strings,
 
     audio: AudioPlayer,
-    mpris_cmd_rx: tokio::sync::mpsc::UnboundedReceiver<MprisCommand>,
+    audio_events: Shared<AudioEvent>,
+    mpris_cmds: Shared<MprisCommand>,
     mpris_update_tx: tokio::sync::mpsc::UnboundedSender<MprisUpdate>,
 }
 
 impl AppState {
     fn new() -> (Self, Task<Message>) {
-        let audio = AudioPlayer::spawn();
+        let mut audio = AudioPlayer::spawn();
+        let audio_events = Arc::new(Mutex::new(Some(audio.take_events())));
 
         let cfg = crate::config::get();
         let folders = music_subfolders(&cfg.music_path());
@@ -81,6 +90,7 @@ impl AppState {
         let (mpris_cmd_tx, mpris_cmd_rx) = tokio::sync::mpsc::unbounded_channel();
         let (mpris_update_tx, mpris_update_rx) = tokio::sync::mpsc::unbounded_channel();
         mpris::launch(mpris_cmd_tx, mpris_update_rx);
+        let mpris_cmds = Arc::new(Mutex::new(Some(mpris_cmd_rx)));
 
         let loaded_theme_name = crate::ui::theme::read_current_theme_name();
         let iced_theme = build_iced_theme();
@@ -104,7 +114,8 @@ impl AppState {
             loaded_theme_name,
             strings: crate::locale::get(),
             audio,
-            mpris_cmd_rx,
+            audio_events,
+            mpris_cmds,
             mpris_update_tx,
         };
 
@@ -262,84 +273,85 @@ impl AppState {
                 Task::none()
             }
 
-            Message::PollAudio => {
-                let mut tasks: Vec<Task<Message>> = Vec::new();
-                while let Ok(event) = self.audio.event_rx.try_recv() {
-                    match event {
-                        AudioEvent::Progress { position, duration } => {
-                            self.position = position;
-                            self.duration = duration;
+            Message::Audio(event) => match event {
+                AudioEvent::Progress { position, duration } => {
+                    self.position = position;
+                    self.duration = duration;
+                    Task::none()
+                }
+                AudioEvent::Paused => {
+                    self.playback_state = PlaybackState::Paused;
+                    Task::none()
+                }
+                AudioEvent::Stopped => {
+                    self.playback_state = PlaybackState::Stopped;
+                    self.position = Duration::ZERO;
+                    self.send_mpris(MprisUpdate::Status(PlaybackStatus::Stopped));
+                    Task::none()
+                }
+                AudioEvent::TrackEnded => {
+                    if self.repeat {
+                        if let Some(t) = self.current_track.clone() {
+                            self.audio.send(AudioCommand::Play(t.path));
+                            self.notify_mpris_track(PlaybackStatus::Playing);
                         }
-                        AudioEvent::Paused => {
+                        Task::none()
+                    } else {
+                        self.advance_auto()
+                    }
+                }
+                AudioEvent::Error(e) => {
+                    eprintln!("Erro de áudio: {e}");
+                    Task::none()
+                }
+                AudioEvent::Playing => {
+                    self.playback_state = PlaybackState::Playing;
+                    Task::none()
+                }
+            },
+
+            Message::Mpris(cmd) => match cmd {
+                MprisCommand::Play => {
+                    if !matches!(self.playback_state, PlaybackState::Playing) {
+                        self.audio.send(AudioCommand::Resume);
+                        self.playback_state = PlaybackState::Playing;
+                        self.send_mpris(MprisUpdate::Status(PlaybackStatus::Playing));
+                    }
+                    Task::none()
+                }
+                MprisCommand::Pause => {
+                    if matches!(self.playback_state, PlaybackState::Playing) {
+                        self.audio.send(AudioCommand::Pause);
+                        self.playback_state = PlaybackState::Paused;
+                        self.send_mpris(MprisUpdate::Status(PlaybackStatus::Paused));
+                    }
+                    Task::none()
+                }
+                MprisCommand::PlayPause => {
+                    match self.playback_state {
+                        PlaybackState::Playing => {
+                            self.audio.send(AudioCommand::Pause);
                             self.playback_state = PlaybackState::Paused;
+                            self.send_mpris(MprisUpdate::Status(PlaybackStatus::Paused));
                         }
-                        AudioEvent::Stopped => {
-                            self.playback_state = PlaybackState::Stopped;
-                            self.position = Duration::ZERO;
-                            self.send_mpris(MprisUpdate::Status(PlaybackStatus::Stopped));
-                        }
-                        AudioEvent::TrackEnded => {
-                            if self.repeat {
-                                if let Some(t) = self.current_track.clone() {
-                                    self.audio.send(AudioCommand::Play(t.path));
-                                    self.notify_mpris_track(PlaybackStatus::Playing);
-                                }
-                            } else {
-                                tasks.push(self.advance_auto());
-                            }
-                        }
-                        AudioEvent::Error(e) => eprintln!("Erro de áudio: {e}"),
-                        AudioEvent::Playing => {
+                        _ => {
+                            self.audio.send(AudioCommand::Resume);
                             self.playback_state = PlaybackState::Playing;
+                            self.send_mpris(MprisUpdate::Status(PlaybackStatus::Playing));
                         }
                     }
+                    Task::none()
                 }
-
-                while let Ok(cmd) = self.mpris_cmd_rx.try_recv() {
-                    match cmd {
-                        MprisCommand::Play => {
-                            if !matches!(self.playback_state, PlaybackState::Playing) {
-                                self.audio.send(AudioCommand::Resume);
-                                self.playback_state = PlaybackState::Playing;
-                                self.send_mpris(MprisUpdate::Status(PlaybackStatus::Playing));
-                            }
-                        }
-                        MprisCommand::Pause => {
-                            if matches!(self.playback_state, PlaybackState::Playing) {
-                                self.audio.send(AudioCommand::Pause);
-                                self.playback_state = PlaybackState::Paused;
-                                self.send_mpris(MprisUpdate::Status(PlaybackStatus::Paused));
-                            }
-                        }
-                        MprisCommand::PlayPause => match self.playback_state {
-                            PlaybackState::Playing => {
-                                self.audio.send(AudioCommand::Pause);
-                                self.playback_state = PlaybackState::Paused;
-                                self.send_mpris(MprisUpdate::Status(PlaybackStatus::Paused));
-                            }
-                            _ => {
-                                self.audio.send(AudioCommand::Resume);
-                                self.playback_state = PlaybackState::Playing;
-                                self.send_mpris(MprisUpdate::Status(PlaybackStatus::Playing));
-                            }
-                        },
-                        MprisCommand::Next => {
-                            tasks.push(self.advance_track(1));
-                        }
-                        MprisCommand::Previous => {
-                            tasks.push(self.advance_track(-1));
-                        }
-                        MprisCommand::Stop => {
-                            self.audio.send(AudioCommand::Stop);
-                            self.playback_state = PlaybackState::Stopped;
-                            self.position = Duration::ZERO;
-                            self.send_mpris(MprisUpdate::Status(PlaybackStatus::Stopped));
-                        }
-                    }
+                MprisCommand::Next => self.advance_track(1),
+                MprisCommand::Previous => self.advance_track(-1),
+                MprisCommand::Stop => {
+                    self.audio.send(AudioCommand::Stop);
+                    self.playback_state = PlaybackState::Stopped;
+                    self.position = Duration::ZERO;
+                    self.send_mpris(MprisUpdate::Status(PlaybackStatus::Stopped));
+                    Task::none()
                 }
-
-                Task::batch(tasks)
-            }
+            },
 
             Message::CheckTheme => {
                 let current = crate::ui::theme::read_current_theme_name();
@@ -375,7 +387,16 @@ impl AppState {
 
     fn subscription(&self) -> Subscription<Message> {
         let base = Subscription::batch([
-            iced::time::every(Duration::from_millis(100)).map(|_| Message::PollAudio),
+            // Eventos do áudio e comandos MPRIS chegam por canal: a UI só acorda
+            // quando há algo a fazer, sem polling ocioso.
+            Subscription::run_with_id(
+                "audio-events",
+                channel_stream(self.audio_events.clone(), Message::Audio),
+            ),
+            Subscription::run_with_id(
+                "mpris-cmds",
+                channel_stream(self.mpris_cmds.clone(), Message::Mpris),
+            ),
             iced::time::every(Duration::from_secs(3)).map(|_| Message::CheckTheme),
             iced::keyboard::on_key_press(|key, _mods| {
                 use iced::keyboard::key::Named;
@@ -535,6 +556,24 @@ impl AppState {
             Task::none()
         }
     }
+}
+
+/// Converte um receptor `mpsc` (tomado uma única vez do holder) em um stream de
+/// `Message`, fonte de uma subscription dirigida por canal.
+fn channel_stream<T>(holder: Shared<T>, map: fn(T) -> Message) -> impl Stream<Item = Message>
+where
+    T: Send + 'static,
+{
+    iced::stream::channel(64, move |mut output| async move {
+        let Some(mut rx) = holder.lock().unwrap().take() else {
+            return;
+        };
+        while let Some(item) = rx.recv().await {
+            if output.send(map(item)).await.is_err() {
+                break;
+            }
+        }
+    })
 }
 
 /// Carrega a capa de `path` em uma thread de bloqueio e devolve `CoverLoaded`.
