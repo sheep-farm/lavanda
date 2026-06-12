@@ -29,6 +29,42 @@ pub enum Focus {
 // ── Mensagens ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
+pub enum EditField {
+    Title,
+    Artist,
+    Album,
+    TrackNumber,
+}
+
+#[derive(Debug, Clone)]
+pub struct EditState {
+    pub track: Track,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub track_number: String,
+    pub saving: bool,
+    pub error: Option<String>,
+}
+
+impl EditState {
+    pub fn from_track(track: &Track) -> Self {
+        EditState {
+            track: track.clone(),
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            track_number: track
+                .track_number
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            saving: false,
+            error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Message {
     SelectFolder(PathBuf),
     FolderScanned(PathBuf, Vec<Track>),
@@ -52,6 +88,12 @@ pub enum Message {
     MoveCursor(i32),
     ActivateCursor,
     SwitchFocus(Focus),
+
+    OpenEditDialog(Track),
+    EditField(EditField, String),
+    SaveMetadata,
+    MetadataSaved(Result<Track, String>),
+    CancelEdit,
 
     Audio(AudioEvent),
     Mpris(MprisCommand),
@@ -88,6 +130,7 @@ pub struct AppState {
     pub strings: &'static crate::locale::Strings,
 
     pub status: Option<String>,
+    pub edit_state: Option<EditState>,
 
     audio: AudioPlayer,
     audio_events: Shared<AudioEvent>,
@@ -164,6 +207,7 @@ impl AppState {
             loaded_theme_name,
             strings: crate::locale::get(),
             status: None,
+            edit_state: None,
             audio,
             audio_events,
             mpris_cmds,
@@ -197,6 +241,26 @@ impl AppState {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        // While the edit dialog is open, block playback/nav shortcuts.
+        // System messages (audio, mpris, theme, drag, dialog actions) pass through.
+        if self.edit_state.is_some()
+            && !matches!(
+                message,
+                Message::EditField(..)
+                    | Message::SaveMetadata
+                    | Message::MetadataSaved(_)
+                    | Message::CancelEdit
+                    | Message::Audio(_)
+                    | Message::Mpris(_)
+                    | Message::CheckTheme
+                    | Message::SidebarDragStart
+                    | Message::SidebarDragMove(_)
+                    | Message::SidebarDragEnd
+                    | Message::VolumeChanged(_)
+            )
+        {
+            return Task::none();
+        }
         match message {
             Message::SelectFolder(path) => {
                 if let Some(idx) = self.folders.iter().position(|f| f == &path) {
@@ -401,6 +465,91 @@ impl AppState {
                 Task::none()
             }
 
+            Message::OpenEditDialog(track) => {
+                self.edit_state = Some(EditState::from_track(&track));
+                Task::none()
+            }
+
+            Message::EditField(field, value) => {
+                if let Some(ref mut es) = self.edit_state {
+                    match field {
+                        EditField::Title => es.title = value,
+                        EditField::Artist => es.artist = value,
+                        EditField::Album => es.album = value,
+                        EditField::TrackNumber => es.track_number = value,
+                    }
+                    es.error = None;
+                }
+                Task::none()
+            }
+
+            Message::SaveMetadata => {
+                let Some(ref mut es) = self.edit_state else {
+                    return Task::none();
+                };
+                es.saving = true;
+                es.error = None;
+
+                let path = es.track.path.clone();
+                let title = es.title.trim().to_owned();
+                let artist = es.artist.trim().to_owned();
+                let album = es.album.trim().to_owned();
+                let track_number: Option<u32> =
+                    es.track_number.trim().parse().ok().filter(|&n: &u32| n > 0);
+                let mut updated = es.track.clone();
+                updated.title = title.clone();
+                updated.artist = artist.clone();
+                updated.album = album.clone();
+                updated.track_number = track_number;
+
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            crate::library::write_tags(&path, &title, &artist, &album, track_number)
+                                .map(|_| updated)
+                                .map_err(|e| e.to_string())
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(e.to_string()))
+                    },
+                    Message::MetadataSaved,
+                )
+            }
+
+            Message::MetadataSaved(result) => {
+                match result {
+                    Ok(updated) => {
+                        if let Some(t) = self.tracks.iter_mut().find(|t| t.path == updated.path) {
+                            *t = updated.clone();
+                        }
+                        if let Some(folder) = self.selected_folder.clone() {
+                            if let Some(cached) = self.folder_cache.get_mut(&folder) {
+                                if let Some(t) = cached.iter_mut().find(|t| t.path == updated.path)
+                                {
+                                    *t = updated.clone();
+                                }
+                            }
+                        }
+                        if self.current_track.as_ref().map(|t| &t.path) == Some(&updated.path) {
+                            self.current_track = Some(updated);
+                        }
+                        self.edit_state = None;
+                    }
+                    Err(msg) => {
+                        if let Some(ref mut es) = self.edit_state {
+                            es.saving = false;
+                            es.error = Some(msg);
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::CancelEdit => {
+                self.edit_state = None;
+                Task::none()
+            }
+
             Message::Audio(event) => match event {
                 AudioEvent::Progress { position, duration } => {
                     self.position = position;
@@ -540,6 +689,7 @@ impl AppState {
                     Key::Named(Named::Space) => Some(Message::PlayPause),
                     Key::Named(Named::ArrowUp) => Some(Message::MoveCursor(-1)),
                     Key::Named(Named::ArrowDown) => Some(Message::MoveCursor(1)),
+                    Key::Named(Named::Escape) => Some(Message::CancelEdit),
                     Key::Named(Named::Enter) => Some(Message::ActivateCursor),
                     Key::Named(Named::ArrowRight) if mods.shift() => {
                         Some(Message::SeekRelative(seek))

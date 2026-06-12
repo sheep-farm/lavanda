@@ -1,8 +1,8 @@
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
+use iced::widget::{button, column, container, mouse_area, row, scrollable, stack, text, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{AppState, Focus, Message};
-use crate::ui::theme;
+use crate::ui::{theme, views};
 
 pub fn view(state: &AppState) -> Element<'_, Message> {
     let sidebar = folder_sidebar(state);
@@ -18,10 +18,16 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     )
     .on_press(Message::SidebarDragStart);
 
-    row![sidebar, drag_handle, track_list]
+    let base: Element<Message> = row![sidebar, drag_handle, track_list]
         .width(Length::Fill)
         .height(Length::Fill)
-        .into()
+        .into();
+
+    if let Some(dialog) = views::dialog::view(state) {
+        stack![base, dialog].into()
+    } else {
+        base
+    }
 }
 
 fn folder_sidebar(state: &AppState) -> Element<'_, Message> {
@@ -188,12 +194,15 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
                 container(track_row).width(Length::Fill)
             };
 
+            let track_btn = button(styled)
+                .on_press(Message::PlayTrack(track.clone()))
+                .style(iced::widget::button::text)
+                .width(Length::Fill)
+                .padding(0);
+
             rows.push(
-                button(styled)
-                    .on_press(Message::PlayTrack(track.clone()))
-                    .style(iced::widget::button::text)
-                    .width(Length::Fill)
-                    .padding(0)
+                mouse_area(track_btn)
+                    .on_right_press(Message::OpenEditDialog(track.clone()))
                     .into(),
             );
             track_idx += 1;

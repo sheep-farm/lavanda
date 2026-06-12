@@ -146,6 +146,39 @@ fn read_tags(path: &Path) -> Result<TrackInfo> {
     })
 }
 
+/// Escreve title/artist/album/track_number nos metadados do arquivo.
+pub fn write_tags(
+    path: &Path,
+    title: &str,
+    artist: &str,
+    album: &str,
+    track_number: Option<u32>,
+) -> Result<()> {
+    use lofty::config::WriteOptions;
+
+    let mut tagged_file = Probe::open(path)?.read()?;
+
+    let has_primary = tagged_file.primary_tag().is_some();
+    let has_any = has_primary || tagged_file.first_tag().is_some();
+    anyhow::ensure!(has_any, "no writable tag found in file");
+
+    let tag = if has_primary {
+        tagged_file.primary_tag_mut().unwrap()
+    } else {
+        tagged_file.first_tag_mut().unwrap()
+    };
+
+    tag.set_title(title.to_owned());
+    tag.set_artist(artist.to_owned());
+    tag.set_album(album.to_owned());
+    if let Some(n) = track_number {
+        tag.set_track(n);
+    }
+
+    tag.save_to_path(path, WriteOptions::default())?;
+    Ok(())
+}
+
 fn cover_from_folder(path: &Path) -> Option<Vec<u8>> {
     let dir = path.parent()?;
     for name in COVER_FILENAMES {

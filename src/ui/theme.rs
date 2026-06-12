@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use iced::widget::container;
-use iced::{Border, Color};
+use iced::widget::{container, text_input};
+use iced::{Border, Color, Shadow, Vector};
 
 // ── Paleta ───────────────────────────────────────────────────────────────────
 
@@ -294,5 +294,58 @@ pub fn album_header(_: &iced::Theme) -> container::Style {
             radius: 0.0.into(),
         },
         ..Default::default()
+    }
+}
+
+pub fn modal_backdrop(_: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(iced::Background::Color(Color {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.6,
+        })),
+        ..Default::default()
+    }
+}
+
+pub fn dialog_card(_: &iced::Theme) -> container::Style {
+    container::Style {
+        background: Some(iced::Background::Color(mantle())),
+        border: Border {
+            color: surface0(),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        shadow: Shadow {
+            color: Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.5,
+            },
+            offset: Vector { x: 0.0, y: 4.0 },
+            blur_radius: 20.0,
+        },
+        ..Default::default()
+    }
+}
+
+pub fn dialog_input(_: &iced::Theme, status: text_input::Status) -> text_input::Style {
+    let border_color = match status {
+        text_input::Status::Focused => accent(),
+        _ => surface0(),
+    };
+    text_input::Style {
+        background: iced::Background::Color(with_alpha(surface0(), 0.5)),
+        border: Border {
+            color: border_color,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        icon: overlay0(),
+        placeholder: overlay0(),
+        value: text(),
+        selection: with_alpha(accent(), 0.3),
     }
 }
