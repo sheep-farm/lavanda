@@ -21,6 +21,10 @@ pub fn launch(viz_buf: Arc<Mutex<VecDeque<f32>>>, tx: UnboundedSender<Vec<f32>>)
             .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (FFT_SIZE - 1) as f32).cos()))
             .collect();
 
+        // Peak follower: decays ~94% per second at 30 fps so the display
+        // adapts to both quiet and loud passages in a few seconds.
+        let mut peak: f32 = 1e-6;
+
         loop {
             std::thread::sleep(Duration::from_millis(33));
 
@@ -50,7 +54,15 @@ pub fn launch(viz_buf: Arc<Mutex<VecDeque<f32>>>, tx: UnboundedSender<Vec<f32>>)
                 .map(|c| c.norm() / (FFT_SIZE as f32 / 4.0))
                 .collect();
 
-            let bars = compute_bars(&mags);
+            // Update peak follower: rise instantly, decay slowly
+            let frame_max = mags.iter().copied().fold(0.0f32, f32::max);
+            peak = peak.max(frame_max) * 0.998;
+            peak = peak.max(1e-6);
+
+            // Normalize mags by running peak before bin grouping
+            let normalized: Vec<f32> = mags.iter().map(|&m| m / peak).collect();
+
+            let bars = compute_bars(&normalized);
 
             if tx.send(bars).is_err() {
                 break;
