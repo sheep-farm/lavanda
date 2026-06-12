@@ -63,8 +63,6 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             .into()
     };
 
-    // Flat column: two Fill spacers vertically center the content block;
-    // spectrum sits as the last fixed-height element.
     let mut layout = column![
         Space::with_height(Length::Fill),
         container(cover).center_x(Length::Fill),
@@ -82,15 +80,17 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             state.repeat,
         ))
         .center_x(Length::Fill),
-        Space::with_height(Length::Fill),
     ]
     .width(Length::Fill)
     .height(Length::Fill);
 
     if state.show_spectrum {
         layout = layout
+            .push(Space::with_height(16))
             .push(spectrum::spectrum_view(&state.spectrum, Length::Fill, Length::Fixed(56.0)));
     }
+
+    layout = layout.push(Space::with_height(Length::Fill));
 
     container(layout)
         .style(|_: &iced::Theme| iced::widget::container::Style {
