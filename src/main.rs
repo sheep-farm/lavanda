@@ -4,6 +4,7 @@ mod config;
 mod library;
 mod locale;
 mod persist;
+mod radio;
 mod state;
 mod ui;
 

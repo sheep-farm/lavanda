@@ -30,6 +30,11 @@ pub enum PlaybackState {
 #[derive(Debug)]
 pub enum AudioCommand {
     Play(PathBuf),
+    /// Toca um stream de rádio (URL + dica de codec do diretório).
+    PlayStream {
+        url: String,
+        codec: String,
+    },
     Pause,
     Resume,
     Stop,
@@ -46,6 +51,8 @@ pub enum AudioEvent {
         position: Duration,
         duration: Duration,
     },
+    /// Título "now playing" de um stream de rádio (metadata ICY).
+    StreamTitle(String),
     Error(String),
     TrackEnded,
 }
@@ -162,6 +169,7 @@ fn audio_thread(
 
     let mut cancel: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let mut current_path: Option<PathBuf> = None;
+    let mut current_stream: Option<String> = None;
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -178,6 +186,7 @@ fn audio_thread(
                     paused.store(false, Ordering::SeqCst);
                     pcm.lock().unwrap().clear();
                     current_path = None;
+                    current_stream = None;
                     let _ = event_tx.send(AudioEvent::Stopped);
                 }
 
@@ -188,7 +197,7 @@ fn audio_thread(
 
                 Some(AudioCommand::Resume) => {
                     paused.store(false, Ordering::SeqCst);
-                    if current_path.is_some() {
+                    if current_path.is_some() || current_stream.is_some() {
                         let _ = event_tx.send(AudioEvent::Playing);
                     }
                 }
@@ -234,6 +243,7 @@ fn audio_thread(
                     let new_cancel = Arc::new(AtomicBool::new(false));
                     cancel = new_cancel.clone();
                     current_path = Some(path.clone());
+                    current_stream = None;
 
                     let _ = event_tx.send(AudioEvent::Playing);
 
@@ -249,6 +259,36 @@ fn audio_thread(
                                 let _ = tx.send(AudioEvent::TrackEnded);
                             }
                             Ok(false) => {}
+                            Err(e) => {
+                                let _ = tx.send(AudioEvent::Error(e.to_string()));
+                            }
+                        }
+                    });
+                }
+
+                Some(AudioCommand::PlayStream { url, codec }) => {
+                    cancel.store(true, Ordering::SeqCst);
+                    paused.store(false, Ordering::SeqCst);
+                    pcm.lock().unwrap().clear();
+
+                    let new_cancel = Arc::new(AtomicBool::new(false));
+                    cancel = new_cancel.clone();
+                    current_path = None;
+                    current_stream = Some(url.clone());
+
+                    let _ = event_tx.send(AudioEvent::Playing);
+
+                    let pcm2 = pcm.clone();
+                    let tx = event_tx.clone();
+                    let vol = shared_vol.clone();
+                    let flag = new_cancel;
+                    let viz = viz_buf.clone();
+
+                    tokio::task::spawn_blocking(move || {
+                        match decode_stream(&url, &codec, pcm2, tx.clone(), vol, flag, viz) {
+                            Ok(_) => {
+                                let _ = tx.send(AudioEvent::Stopped);
+                            }
                             Err(e) => {
                                 let _ = tx.send(AudioEvent::Error(e.to_string()));
                             }
@@ -315,7 +355,6 @@ fn decode_file(
     let track_id = track.id;
     let time_base = track.codec_params.time_base;
     let n_frames = track.codec_params.n_frames;
-    let file_rate = track.codec_params.sample_rate.unwrap_or(44100);
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
@@ -370,46 +409,9 @@ fn decode_file(
             Err(e) => return Err(anyhow!("Decode: {e}")),
         };
 
-        let spec = *decoded.spec();
-        let n_channels = spec.channels.count();
-
-        let mut conv = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
-        conv.copy_interleaved_ref(decoded);
-        let raw = conv.samples();
-
-        // Lê volume atual (pode ter mudado desde o último packet)
+        let file_rate = decoded.spec().rate;
         let vol = *volume.lock().unwrap();
-
-        let stereo: Vec<f32> = match n_channels {
-            1 => raw.iter().flat_map(|&s| [s * vol, s * vol]).collect(),
-            2 => raw.iter().map(|&s| s * vol).collect(),
-            n => raw
-                .chunks(n)
-                .flat_map(|ch| {
-                    let l = ch.first().copied().unwrap_or(0.0) * vol;
-                    let r = ch.get(1).copied().unwrap_or(0.0) * vol;
-                    [l, r]
-                })
-                .collect(),
-        };
-
-        let samples = if file_rate != OUTPUT_RATE {
-            resample_stereo(&stereo, file_rate, OUTPUT_RATE)
-        } else {
-            stereo
-        };
-
-        // Downmix to mono for spectrum visualizer
-        {
-            let mut vb = viz_buf.lock().unwrap();
-            for ch in samples.chunks(2) {
-                let mono = (ch[0] + ch.get(1).copied().unwrap_or(ch[0])) * 0.5;
-                vb.push_back(mono);
-            }
-            while vb.len() > VIZ_BUF_CAP {
-                vb.pop_front();
-            }
-        }
+        let samples = decoded_to_output(decoded, file_rate, vol, &viz_buf);
 
         sample_count += samples.len() as u64 / 2;
 
@@ -423,20 +425,193 @@ fn decode_file(
             }
         }
 
-        loop {
-            if cancel.load(Ordering::SeqCst) {
-                return Ok(false);
-            }
-            if pcm.lock().unwrap().len() < OUTPUT_RATE as usize * 2 {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
+        if !push_pcm(&pcm, &cancel, samples) {
+            return Ok(false);
         }
-
-        pcm.lock().unwrap().extend(samples);
     }
 
     Ok(true)
+}
+
+// ── Decode de stream de rádio ──────────────────────────────────────────────────
+
+/// Decodifica um stream HTTP infinito. Sem seek e sem duração; emite Progress
+/// com `duration = ZERO` (a UI trata isso como "ao vivo").
+fn decode_stream(
+    url: &str,
+    codec: &str,
+    pcm: Arc<Mutex<VecDeque<f32>>>,
+    event_tx: mpsc::UnboundedSender<AudioEvent>,
+    volume: Arc<Mutex<f32>>,
+    cancel: Arc<AtomicBool>,
+    viz_buf: Arc<Mutex<VecDeque<f32>>>,
+) -> Result<()> {
+    let (source, info) = super::stream::open(url, event_tx.clone(), cancel.clone())?;
+    let mss = MediaSourceStream::new(Box::new(source), Default::default());
+
+    // Dica de formato: prefere o Content-Type do servidor, cai para o codec do diretório.
+    let mut hint = Hint::new();
+    let ct = info.content_type.to_ascii_lowercase();
+    let ext = if ct.contains("mpeg") || ct.contains("mp3") {
+        Some("mp3")
+    } else if ct.contains("aac") {
+        Some("aac")
+    } else if ct.contains("ogg") || ct.contains("opus") {
+        Some("ogg")
+    } else if ct.contains("flac") {
+        Some("flac")
+    } else {
+        match codec.to_ascii_lowercase().as_str() {
+            "mp3" => Some("mp3"),
+            "aac" | "aac+" | "aacp" => Some("aac"),
+            "ogg" | "vorbis" | "opus" => Some("ogg"),
+            "flac" => Some("flac"),
+            _ => None,
+        }
+    };
+    if let Some(e) = ext {
+        hint.with_extension(e);
+    }
+
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| {
+            anyhow!(
+                "formato não reconhecido (codec={codec}, content-type=\"{}\", stream={}): {e}",
+                info.content_type,
+                info.final_url
+            )
+        })?;
+
+    let mut format = probed.format;
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .ok_or_else(|| anyhow!("Nenhuma faixa de áudio"))?;
+    let track_id = track.id;
+
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| anyhow!("Decoder: {e}"))?;
+
+    let mut sample_count = 0u64;
+    let mut next_emit = Duration::ZERO;
+
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(SymphoniaError::IoError(_)) => return Ok(()),
+            Err(SymphoniaError::ResetRequired) => {
+                decoder.reset();
+                continue;
+            }
+            Err(e) => return Err(anyhow!("Packet: {e}")),
+        };
+
+        if packet.track_id() != track_id {
+            continue;
+        }
+
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(SymphoniaError::DecodeError(_)) => continue,
+            Err(e) => return Err(anyhow!("Decode: {e}")),
+        };
+
+        let file_rate = decoded.spec().rate;
+        let vol = *volume.lock().unwrap();
+        let samples = decoded_to_output(decoded, file_rate, vol, &viz_buf);
+
+        sample_count += samples.len() as u64 / 2;
+        let position = Duration::from_secs_f64(sample_count as f64 / OUTPUT_RATE as f64);
+        if position >= next_emit {
+            let _ = event_tx.send(AudioEvent::Progress {
+                position,
+                duration: Duration::ZERO,
+            });
+            next_emit = position + Duration::from_millis(500);
+        }
+
+        if !push_pcm(&pcm, &cancel, samples) {
+            return Ok(());
+        }
+    }
+}
+
+// ── Helpers de decode (compartilhados entre arquivo e stream) ───────────────────
+
+/// Converte um buffer decodificado em PCM estéreo a `OUTPUT_RATE`, aplica volume
+/// e alimenta o buffer do visualizador.
+fn decoded_to_output(
+    decoded: symphonia::core::audio::AudioBufferRef,
+    file_rate: u32,
+    vol: f32,
+    viz_buf: &Arc<Mutex<VecDeque<f32>>>,
+) -> Vec<f32> {
+    let spec = *decoded.spec();
+    let n_channels = spec.channels.count();
+
+    let mut conv = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+    conv.copy_interleaved_ref(decoded);
+    let raw = conv.samples();
+
+    let stereo: Vec<f32> = match n_channels {
+        1 => raw.iter().flat_map(|&s| [s * vol, s * vol]).collect(),
+        2 => raw.iter().map(|&s| s * vol).collect(),
+        n => raw
+            .chunks(n)
+            .flat_map(|ch| {
+                let l = ch.first().copied().unwrap_or(0.0) * vol;
+                let r = ch.get(1).copied().unwrap_or(0.0) * vol;
+                [l, r]
+            })
+            .collect(),
+    };
+
+    let samples = if file_rate != OUTPUT_RATE {
+        resample_stereo(&stereo, file_rate, OUTPUT_RATE)
+    } else {
+        stereo
+    };
+
+    {
+        let mut vb = viz_buf.lock().unwrap();
+        for ch in samples.chunks(2) {
+            let mono = (ch[0] + ch.get(1).copied().unwrap_or(ch[0])) * 0.5;
+            vb.push_back(mono);
+        }
+        while vb.len() > VIZ_BUF_CAP {
+            vb.pop_front();
+        }
+    }
+
+    samples
+}
+
+/// Empurra PCM para o buffer de saída com backpressure. Retorna `false` se
+/// cancelado durante a espera.
+fn push_pcm(pcm: &Arc<Mutex<VecDeque<f32>>>, cancel: &Arc<AtomicBool>, samples: Vec<f32>) -> bool {
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return false;
+        }
+        if pcm.lock().unwrap().len() < OUTPUT_RATE as usize * 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    pcm.lock().unwrap().extend(samples);
+    true
 }
 
 fn resample_stereo(input: &[f32], in_rate: u32, out_rate: u32) -> Vec<f32> {

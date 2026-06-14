@@ -47,6 +47,13 @@ serde_json = "1"
 # Data/hora (recently played)
 chrono = { version = "0.4", features = ["serde"] }
 
+# HTTP cliente (radio-browser API + streaming Icecast/Shoutcast)
+ureq = { version = "2", features = ["json", "tls"] }
+
+# Parsing de metadata ICY (now playing das rádios)
+# default-features=false evita puxar reqwest (só usamos o IcyMetadataReader)
+icy-metadata = { version = "0.6", default-features = false }
+
 [profile.release]
 opt-level = "z"
 lto = true

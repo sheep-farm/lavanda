@@ -6,7 +6,20 @@ use crate::ui::components::{controls, progress, spectrum};
 use crate::ui::{icons, theme};
 
 pub fn view(state: &AppState) -> Element<'_, Message> {
-    let cover: Element<Message> = if let Some(data) = state
+    let cover: Element<Message> = if state.current_station.is_some() {
+        container(
+            text(icons::ICON_BROADCAST)
+                .font(icons::NERD_FONT_MONO)
+                .color(theme::accent())
+                .size(96),
+        )
+        .width(160)
+        .height(160)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(theme::card)
+        .into()
+    } else if let Some(data) = state
         .current_track
         .as_ref()
         .and_then(|t| t.cover_data.as_ref())
@@ -67,6 +80,22 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             ))
             .color(theme::subtext())
             .size(13),
+        ]
+        .spacing(4)
+        .align_x(Alignment::Center)
+        .into()
+    } else if let Some(station) = &state.current_station {
+        let now = state
+            .stream_title
+            .clone()
+            .unwrap_or_else(|| "Live stream".to_string());
+        column![
+            text("RADIO").color(theme::accent()).size(13).font(icons::UI_FONT_BOLD),
+            text(&station.name).color(theme::text()).size(22).font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..icons::UI_FONT
+            }),
+            text(now).color(theme::subtext()).size(13),
         ]
         .spacing(4)
         .align_x(Alignment::Center)

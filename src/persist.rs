@@ -77,6 +77,10 @@ pub struct Db {
     pub hidden_artists_albums: Vec<(String, bool)>,
     #[serde(default = "default_columns")]
     pub table_columns: Vec<TableColumn>,
+    #[serde(default)]
+    pub radio_favorites: Vec<crate::radio::RadioStation>,
+    #[serde(default)]
+    pub radio_quarantine: Vec<String>,
 }
 
 impl Default for Db {
@@ -88,6 +92,8 @@ impl Default for Db {
             recently_played: Vec::new(),
             hidden_artists_albums: Vec::new(),
             table_columns: default_columns(),
+            radio_favorites: Vec::new(),
+            radio_quarantine: Vec::new(),
         }
     }
 }
@@ -209,5 +215,57 @@ pub fn add_to_playlist(name: String, path: PathBuf) {
         if !list.contains(&path) {
             list.push(path);
         }
+    });
+}
+
+// ── Rádio ──────────────────────────────────────────────────────────────────────
+
+/// Identidade de uma estação: uuid quando houver, senão a URL.
+fn station_key(s: &crate::radio::RadioStation) -> String {
+    if !s.stationuuid.is_empty() {
+        s.stationuuid.clone()
+    } else {
+        s.url.clone()
+    }
+}
+
+pub fn is_radio_favorite(station: &crate::radio::RadioStation) -> bool {
+    let key = station_key(station);
+    get(|db| db.radio_favorites.iter().any(|s| station_key(s) == key))
+}
+
+/// Alterna o favorito; retorna `true` se passou a ser favorito.
+pub fn toggle_radio_favorite(station: &crate::radio::RadioStation) -> bool {
+    let key = station_key(station);
+    write(|db| {
+        if let Some(pos) = db.radio_favorites.iter().position(|s| station_key(s) == key) {
+            db.radio_favorites.remove(pos);
+            false
+        } else {
+            db.radio_favorites.push(station.clone());
+            true
+        }
+    })
+}
+
+pub fn radio_favorites() -> Vec<crate::radio::RadioStation> {
+    get(|db| db.radio_favorites.clone())
+}
+
+pub fn is_quarantined(station: &crate::radio::RadioStation) -> bool {
+    let key = station_key(station);
+    get(|db| db.radio_quarantine.iter().any(|k| k == &key))
+}
+
+/// Coloca a estação em quarentena (não aparece mais nas listas).
+pub fn quarantine_station(station: &crate::radio::RadioStation) {
+    let key = station_key(station);
+    write(|db| {
+        if !db.radio_quarantine.contains(&key) {
+            db.radio_quarantine.push(key);
+        }
+        // Quarentena também remove dos favoritos, se estiver lá.
+        db.radio_favorites
+            .retain(|s| station_key(s) != station_key(station));
     });
 }

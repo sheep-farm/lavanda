@@ -57,6 +57,36 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         .spacing(8)
         .align_y(Alignment::Start)
         .into()
+    } else if let Some(station) = &state.current_station {
+        let fav = crate::persist::is_radio_favorite(station);
+        let star = button(
+            text(icons::ICON_STAR)
+                .font(icons::NERD_FONT_MONO)
+                .size(30)
+                .color(if fav { theme::accent() } else { theme::overlay0() }),
+        )
+        .on_press(Message::ToggleFavoriteStation(station.clone()))
+        .style(iced::widget::button::text)
+        .padding([0, 4]);
+
+        let now = state
+            .stream_title
+            .clone()
+            .unwrap_or_else(|| "Live stream".to_string());
+
+        row![
+            column![
+                text("RADIO").size(11).color(theme::accent()).font(icons::UI_FONT_BOLD),
+                text(&station.name).color(theme::text()).size(20).font(icons::UI_FONT_BOLD),
+                text(now).color(theme::subtext()).size(13),
+            ]
+            .spacing(4)
+            .width(Length::Fill),
+            star,
+        ]
+        .spacing(8)
+        .align_y(Alignment::Start)
+        .into()
     } else {
         column![text(state.strings.no_track)
             .color(theme::overlay0())
@@ -64,8 +94,21 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         .into()
     };
 
-    // Capa do álbum
-    let cover: Element<Message> = if let Some(data) = state
+    // Capa do álbum (ou ícone de rádio quando tocando uma estação)
+    let cover: Element<Message> = if state.current_station.is_some() {
+        container(
+            text(icons::ICON_BROADCAST)
+                .font(icons::NERD_FONT_MONO)
+                .color(theme::accent())
+                .size(96),
+        )
+        .width(180)
+        .height(180)
+        .align_x(iced::alignment::Horizontal::Center)
+        .align_y(iced::alignment::Vertical::Center)
+        .style(theme::card)
+        .into()
+    } else if let Some(data) = state
         .current_track
         .as_ref()
         .and_then(|t| t.cover_data.as_ref())
@@ -91,10 +134,22 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         .into()
     };
 
+    // Rádio é "ao vivo": sem barra de seek, apenas um indicador LIVE.
+    let progress_el: Element<Message> = if state.current_station.is_some() {
+        container(
+            text("● LIVE").size(13).color(theme::red()).font(icons::UI_FONT_BOLD),
+        )
+        .width(Length::Fill)
+        .center_x(Length::Fill)
+        .into()
+    } else {
+        progress::progress_bar(state.position, state.duration)
+    };
+
     let info_col = column![
         track_info,
         Space::with_height(12),
-        progress::progress_bar(state.position, state.duration),
+        progress_el,
         Space::with_height(8),
         controls::playback_controls(
             &state.playback_state,

@@ -31,6 +31,7 @@ pub enum ViewMode {
     Artists,
     Albums,
     Genres,
+    Radios,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,6 +147,18 @@ pub enum Message {
     SelectGenre(String),
     SelectPlaylist(String),
     SelectPlaylistTab(PlaylistTab),
+
+    // Rádio (radio-browser.info)
+    RadioSearchChanged(String),
+    RadioSearchSubmit,
+    RadioShowTop,
+    RadioResults(Result<Vec<crate::radio::RadioStation>, String>),
+    PlayStation(crate::radio::RadioStation),
+    ToggleFavoriteStation(crate::radio::RadioStation),
+    QuarantineStation(crate::radio::RadioStation),
+    CloseRadioError,
+    CheckNetwork,
+    NetworkStatus(bool),
 
     // Double-click
     DoubleClickTrack(Track),
@@ -267,6 +280,18 @@ pub struct AppState {
     // Biblioteca
     pub all_tracks: Vec<Track>,
     pub tracks: Vec<Track>,
+
+    // Rádio
+    pub radio_results: Vec<crate::radio::RadioStation>,
+    pub radio_search: String,
+    pub radio_loading: bool,
+    pub radio_error: Option<String>,
+    /// Diálogo de erro de reprodução: (estação, mensagem). Permite quarentena.
+    pub radio_error_dialog: Option<(crate::radio::RadioStation, String)>,
+    pub current_station: Option<crate::radio::RadioStation>,
+    pub stream_title: Option<String>,
+    /// Conectividade — a aba Radios fica desabilitada quando offline.
+    pub online: bool,
 
     // ViewMode
     pub view_mode: ViewMode,
@@ -395,6 +420,14 @@ impl AppState {
             repeat: cfg.repeat,
             all_tracks: Vec::new(),
             tracks: Vec::new(),
+            radio_results: Vec::new(),
+            radio_search: String::new(),
+            radio_loading: false,
+            radio_error: None,
+            radio_error_dialog: None,
+            current_station: None,
+            stream_title: None,
+            online: true,
             view_mode: ViewMode::Artists,
             selected_artist: None,
             selected_album: None,
@@ -445,7 +478,9 @@ impl AppState {
             mpris_update_tx,
         };
 
-        (state, scan_task)
+        // Verifica conectividade no startup (a aba Radios reflete o resultado).
+        let init = Task::batch([scan_task, Task::done(Message::CheckNetwork)]);
+        (state, init)
     }
 
     fn persist_state(&self) {
@@ -579,6 +614,10 @@ impl AppState {
                     } else {
                         self.tracks = Vec::new();
                     }
+                }
+                ViewMode::Radios => {
+                    // A aba Radios usa seu próprio painel; a lista de faixas fica vazia.
+                    self.tracks = Vec::new();
                 }
             }
         }
@@ -761,8 +800,106 @@ impl AppState {
                     ViewMode::Artists => { self.selected_artist = self.artists().first().cloned(); }
                     ViewMode::Albums => { self.selected_album = self.albums().first().cloned(); }
                     ViewMode::Genres => { self.selected_genre = self.genres().first().cloned(); }
+                    ViewMode::Radios => {
+                        // Mostra os favoritos; se não há resultados ainda, busca o top.
+                        if self.radio_results.is_empty() && !self.radio_loading {
+                            return Task::done(Message::RadioShowTop);
+                        }
+                    }
                 }
                 self.update_filtered_tracks();
+                Task::none()
+            }
+
+            // ── Rádio ───────────────────────────────────────────────────────────
+
+            Message::RadioSearchChanged(q) => { self.radio_search = q; Task::none() }
+
+            Message::RadioSearchSubmit => {
+                let query = self.radio_search.trim().to_string();
+                if query.is_empty() {
+                    return Task::done(Message::RadioShowTop);
+                }
+                self.radio_loading = true;
+                self.radio_error = None;
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || crate::radio::search(&query))
+                            .await
+                            .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::RadioResults,
+                )
+            }
+
+            Message::RadioShowTop => {
+                self.radio_loading = true;
+                self.radio_error = None;
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(|| crate::radio::top(100))
+                            .await
+                            .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::RadioResults,
+                )
+            }
+
+            Message::RadioResults(result) => {
+                self.radio_loading = false;
+                match result {
+                    Ok(mut stations) => {
+                        stations.retain(|s| !crate::persist::is_quarantined(s));
+                        self.radio_results = stations;
+                        self.radio_error = None;
+                    }
+                    Err(e) => { self.radio_error = Some(e); }
+                }
+                Task::none()
+            }
+
+            Message::PlayStation(station) => self.play_station_internal(station),
+
+            Message::ToggleFavoriteStation(station) => {
+                crate::persist::toggle_radio_favorite(&station);
+                Task::none()
+            }
+
+            Message::QuarantineStation(station) => {
+                crate::persist::quarantine_station(&station);
+                // Some da lista atual e fecha o diálogo de erro.
+                let key_uuid = station.stationuuid.clone();
+                let key_url = station.url.clone();
+                self.radio_results.retain(|s| {
+                    if !key_uuid.is_empty() { s.stationuuid != key_uuid } else { s.url != key_url }
+                });
+                self.radio_error_dialog = None;
+                Task::none()
+            }
+
+            Message::CloseRadioError => { self.radio_error_dialog = None; Task::none() }
+
+            Message::CheckNetwork => Task::perform(
+                async {
+                    tokio::task::spawn_blocking(crate::radio::is_online)
+                        .await
+                        .unwrap_or(false)
+                },
+                Message::NetworkStatus,
+            ),
+
+            Message::NetworkStatus(online) => {
+                self.online = online;
+                // Saiu do offline e a lista está vazia? Carrega o top.
+                if online
+                    && self.view_mode == ViewMode::Radios
+                    && self.radio_results.is_empty()
+                    && !self.radio_loading
+                {
+                    return Task::done(Message::RadioShowTop);
+                }
                 Task::none()
             }
 
@@ -1456,6 +1593,7 @@ impl AppState {
 
                 match key {
                     Key::Named(Named::Escape) => {
+                        if self.radio_error_dialog.is_some() { return Task::done(Message::CloseRadioError); }
                         if has_shortcuts { return Task::done(Message::CloseShortcuts); }
                         if has_playlist_dialog { return Task::done(Message::ClosePlaylistDialog); }
                         if has_tag_editor { return Task::done(Message::CloseTagEditor); }
@@ -1539,6 +1677,21 @@ impl AppState {
                     self.send_mpris(MprisUpdate::Status(PlaybackStatus::Stopped));
                     Task::none()
                 }
+                AudioEvent::StreamTitle(title) => {
+                    let title = title.trim().to_string();
+                    self.stream_title = if title.is_empty() { None } else { Some(title) };
+                    if let Some(station) = self.current_station.clone() {
+                        let now = self.stream_title.clone().unwrap_or_else(|| station.name.clone());
+                        self.send_mpris(MprisUpdate::Metadata {
+                            title: now,
+                            artist: station.name.clone(),
+                            album: "Radio".to_string(),
+                            duration_us: 0,
+                            art_url: None,
+                        });
+                    }
+                    Task::none()
+                }
                 AudioEvent::TrackEnded => {
                     if self.repeat {
                         if let Some(t) = self.current_track.clone() {
@@ -1564,7 +1717,27 @@ impl AppState {
                         }
                     }
                 }
-                AudioEvent::Error(e) => { eprintln!("Audio error: {e}"); Task::none() }
+                AudioEvent::Error(e) => {
+                    if let Some(station) = self.current_station.clone() {
+                        // Identifica a estação na log e abre um diálogo (mantém a lista).
+                        eprintln!(
+                            "Radio error: \"{}\" [{}] codec={} bitrate={} url={} :: {}",
+                            station.name,
+                            station.countrycode,
+                            station.codec,
+                            station.bitrate,
+                            station.stream_url(),
+                            e
+                        );
+                        self.radio_error_dialog = Some((station, e));
+                        self.current_station = None;
+                        self.stream_title = None;
+                        self.playback_state = PlaybackState::Stopped;
+                    } else {
+                        eprintln!("Audio error: {e}");
+                    }
+                    Task::none()
+                }
                 AudioEvent::Playing => { self.playback_state = PlaybackState::Playing; Task::none() }
             },
 
@@ -1672,7 +1845,78 @@ impl AppState {
             view_stack = view_stack.push(self.context_menu_view(target));
         }
 
+        // Diálogo de erro de rádio (com opção de quarentena)
+        if let Some((ref station, ref msg)) = self.radio_error_dialog {
+            view_stack = view_stack.push(self.radio_error_dialog_view(station, msg));
+        }
+
         view_stack.into()
+    }
+
+    fn radio_error_dialog_view<'a>(
+        &self,
+        station: &crate::radio::RadioStation,
+        msg: &str,
+    ) -> Element<'a, Message> {
+        use iced::widget::button;
+
+        let title = format!("Não foi possível tocar \"{}\"", station.name);
+        let content = column![
+            row![
+                text(crate::ui::icons::ICON_BROADCAST)
+                    .font(crate::ui::icons::NERD_FONT_MONO)
+                    .size(28)
+                    .color(theme::red()),
+                text(title).size(15).font(crate::ui::icons::UI_FONT_BOLD).color(theme::text()),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+            Space::with_height(10),
+            text(msg.to_string()).size(12).color(theme::subtext()),
+            Space::with_height(18),
+            row![
+                button(text("Quarentenar estação").size(13).color(theme::base()))
+                    .on_press(Message::QuarantineStation(station.clone()))
+                    .style(theme::primary_button)
+                    .padding([6, 14]),
+                Space::with_width(Length::Fill),
+                button(text("Fechar").size(13))
+                    .on_press(Message::CloseRadioError)
+                    .style(theme::secondary_button)
+                    .padding([6, 14]),
+            ]
+            .align_y(Alignment::Center),
+            Space::with_height(8),
+            text("A quarentena remove a estação das listas permanentemente.")
+                .size(11)
+                .color(theme::overlay0()),
+        ]
+        .spacing(0)
+        .padding(20);
+
+        let card = container(content)
+            .width(420)
+            .style(|_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(theme::mantle())),
+                border: iced::Border { color: theme::red(), width: 1.0, radius: 8.0.into() },
+                shadow: iced::Shadow {
+                    color: theme::base(),
+                    offset: iced::Vector { x: 0.0, y: 4.0 },
+                    blur_radius: 16.0,
+                },
+                ..Default::default()
+            });
+
+        container(card)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(|_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgba(0.0, 0.0, 0.0, 0.55))),
+                ..Default::default()
+            })
+            .into()
     }
 
     fn header_view(&self) -> Element<'_, Message> {
@@ -1946,6 +2190,7 @@ impl AppState {
             Subscription::run_with_id("mpris-cmds", channel_stream(self.mpris_cmds.clone(), Message::Mpris)),
             Subscription::run_with_id("spectrum", channel_stream(self.spectrum_rx.clone(), Message::SpectrumData)),
             iced::time::every(Duration::from_secs(3)).map(|_| Message::CheckTheme),
+            iced::time::every(Duration::from_secs(15)).map(|_| Message::CheckNetwork),
             iced::keyboard::on_key_press(|key, _mods| Some(Message::KeyPressed(key))),
             iced::event::listen_with(|event, _, _| match event {
                 iced::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(mods)) => {
@@ -1992,6 +2237,8 @@ impl AppState {
         let track = Track { cover_data: cover_data.clone(), ..track };
         self.audio.send(AudioCommand::Play(track.path.clone()));
         self.audio.send(AudioCommand::SetVolume(self.volume));
+        self.current_station = None;
+        self.stream_title = None;
         self.current_track = Some(track.clone());
         self.selected_track = Some(track.clone());
         self.playback_state = PlaybackState::Playing;
@@ -2037,6 +2284,43 @@ impl AppState {
         } else {
             Task::none()
         }
+    }
+
+    fn play_station_internal(&mut self, station: crate::radio::RadioStation) -> Task<Message> {
+        let url = station.stream_url().to_string();
+        if url.is_empty() {
+            self.radio_error = Some("Estação sem URL de stream".into());
+            return Task::none();
+        }
+        self.audio.send(AudioCommand::PlayStream {
+            url,
+            codec: station.codec.clone(),
+        });
+        self.audio.send(AudioCommand::SetVolume(self.volume));
+
+        self.current_track = None;
+        self.stream_title = None;
+        self.current_station = Some(station.clone());
+        self.playback_state = PlaybackState::Playing;
+        self.position = Duration::ZERO;
+        self.duration = Duration::ZERO;
+
+        // Metadata inicial no MPRIS (o título "now playing" chega depois via ICY).
+        self.send_mpris(MprisUpdate::Metadata {
+            title: station.name.clone(),
+            artist: station.name.clone(),
+            album: "Radio".to_string(),
+            duration_us: 0,
+            art_url: None,
+        });
+        self.send_mpris(MprisUpdate::Status(PlaybackStatus::Playing));
+
+        // Registra o play no diretório (educado, em background).
+        let uuid = station.stationuuid.clone();
+        std::thread::spawn(move || crate::radio::register_click(&uuid));
+
+        send_track_notification(&station.name, "Radio");
+        Task::none()
     }
 
     fn advance_track(&mut self, delta: i32) -> Task<Message> {

@@ -26,9 +26,13 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     .interaction(iced::mouse::Interaction::ResizingHorizontally)
     .on_press(Message::SidebarDragStart);
 
-    let track_list = track_list_view(state);
+    let main_panel = if state.view_mode == ViewMode::Radios {
+        radio_panel_view(state)
+    } else {
+        track_list_view(state)
+    };
 
-    row![sidebar, drag_handle, track_list]
+    row![sidebar, drag_handle, main_panel]
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -37,9 +41,15 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
 fn sidebar_view(state: &AppState) -> Element<'_, Message> {
-    let tab_btn = |label: &'static str, mode: ViewMode, icon: &'static str| -> Element<'_, Message> {
+    let tab_btn = |label: &'static str, mode: ViewMode, icon: &'static str, enabled: bool| -> Element<'_, Message> {
         let active = state.view_mode == mode && state.selected_playlist.is_none();
-        let color = if active { theme::accent() } else { theme::subtext() };
+        let color = if !enabled {
+            theme::with_alpha(theme::overlay0(), 0.5)
+        } else if active {
+            theme::accent()
+        } else {
+            theme::subtext()
+        };
         button(
             row![
                 text(icon).font(icons::NERD_FONT_MONO).size(24).color(color),
@@ -48,16 +58,18 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
             .spacing(4)
             .align_y(Alignment::Center),
         )
-        .on_press(Message::SelectViewMode(mode))
+        .on_press_maybe(enabled.then_some(Message::SelectViewMode(mode)))
         .style(iced::widget::button::text)
         .padding([4, 6])
         .into()
     };
 
     let tabs = row![
-        tab_btn("Artists", ViewMode::Artists, icons::ICON_MUSIC),
-        tab_btn("Albums", ViewMode::Albums, icons::ICON_LIST),
-        tab_btn("Genres", ViewMode::Genres, icons::ICON_PODIUM),
+        tab_btn("Artists", ViewMode::Artists, icons::ICON_MUSIC, true),
+        tab_btn("Albums", ViewMode::Albums, icons::ICON_LIST, true),
+        tab_btn("Genres", ViewMode::Genres, icons::ICON_PODIUM, true),
+        // Radios fica desabilitada quando offline.
+        tab_btn("Radios", ViewMode::Radios, icons::ICON_BROADCAST, state.online),
     ]
     .spacing(4);
 
@@ -96,6 +108,7 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
             let selected = state.selected_genre.clone();
             build_sidebar_list(items, selected, None, Message::SelectGenre, None)
         }
+        ViewMode::Radios => radio_favorites_list(state),
     };
 
     let list_with_context: Element<Message> = mouse_area(
@@ -351,6 +364,168 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
     .height(Length::Fixed(state.playlist_height))
     .width(Length::Fill)
     .into()
+}
+
+// ── Rádio ───────────────────────────────────────────────────────────────────
+
+/// Lista de estações favoritas na sidebar (aba Radios).
+fn radio_favorites_list(state: &AppState) -> Element<'static, Message> {
+    let favorites = crate::persist::radio_favorites();
+    if favorites.is_empty() {
+        return container(
+            text("No favorite stations.\nStar one from the list →")
+                .size(12)
+                .color(theme::overlay0()),
+        )
+        .padding([12, 10])
+        .width(Length::Fill)
+        .into();
+    }
+
+    let current = state.current_station.as_ref().map(|s| s.stationuuid.clone());
+    let rows: Vec<Element<'static, Message>> = favorites
+        .into_iter()
+        .map(|st| {
+            let is_current = current.as_deref() == Some(st.stationuuid.as_str());
+            let color = if is_current { theme::green() } else { theme::text() };
+            let label = st.name.clone();
+            button(text(label).size(13).color(color).width(Length::Fill))
+                .on_press(Message::PlayStation(st))
+                .style(iced::widget::button::text)
+                .width(Length::Fill)
+                .padding([5, 10])
+                .into()
+        })
+        .collect();
+
+    column(rows).spacing(1).into()
+}
+
+/// Painel principal da aba Radios: busca + resultados.
+fn radio_panel_view(state: &AppState) -> Element<'_, Message> {
+    let search = row![
+        text(icons::ICON_SEARCH)
+            .font(icons::NERD_FONT_MONO)
+            .size(24)
+            .color(theme::overlay0()),
+        text_input("Search stations…", &state.radio_search)
+            .on_input(Message::RadioSearchChanged)
+            .on_submit(Message::RadioSearchSubmit)
+            .style(theme::dialog_input)
+            .size(13)
+            .padding([4, 8])
+            .width(Length::Fill),
+        button(text("Search").size(13))
+            .on_press(Message::RadioSearchSubmit)
+            .style(theme::primary_button)
+            .padding([5, 14]),
+        button(text("Top").size(13))
+            .on_press(Message::RadioShowTop)
+            .style(theme::secondary_button)
+            .padding([5, 14]),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .padding([6, 12]);
+
+    // Resultados têm prioridade: um erro de API/reprodução nunca apaga a lista.
+    let body: Element<Message> = if state.radio_loading {
+        container(text("Loading…").size(15).color(theme::overlay0()))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else if !state.radio_results.is_empty() {
+        let current = state.current_station.as_ref().map(|s| s.stationuuid.clone());
+        let rows: Vec<Element<Message>> = state
+            .radio_results
+            .iter()
+            .map(|st| radio_row(st, current.as_deref()))
+            .collect();
+        scrollable(column(rows).spacing(1))
+            .id(scrollable::Id::new("radio_scroll"))
+            .height(Length::Fill)
+            .into()
+    } else if let Some(err) = &state.radio_error {
+        container(text(format!("Error: {err}")).size(14).color(theme::red()))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    } else {
+        container(text("No stations. Try a search.").size(14).color(theme::overlay0()))
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    };
+
+    column![search, body]
+        .spacing(0)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+fn radio_row(st: &crate::radio::RadioStation, current_uuid: Option<&str>) -> Element<'static, Message> {
+    let is_current = current_uuid == Some(st.stationuuid.as_str());
+    let is_fav = crate::persist::is_radio_favorite(st);
+
+    let name_color = if is_current { theme::accent() } else { theme::text() };
+    let name = if is_current { format!("▶ {}", st.name) } else { st.name.clone() };
+
+    let mut meta_parts: Vec<String> = Vec::new();
+    if !st.codec.is_empty() { meta_parts.push(st.codec.clone()); }
+    if st.bitrate > 0 { meta_parts.push(format!("{} kbps", st.bitrate)); }
+    if !st.countrycode.is_empty() { meta_parts.push(st.countrycode.clone()); }
+    if !st.tags.is_empty() {
+        let tags: String = st.tags.split(',').take(3).collect::<Vec<_>>().join(", ");
+        if !tags.is_empty() { meta_parts.push(tags); }
+    }
+    let meta = meta_parts.join("  ·  ");
+
+    let star = button(
+        text(icons::ICON_STAR)
+            .font(icons::NERD_FONT_MONO)
+            .size(18)
+            .color(if is_fav { theme::accent() } else { theme::with_alpha(theme::overlay0(), 0.5) }),
+    )
+    .on_press(Message::ToggleFavoriteStation(st.clone()))
+    .style(iced::widget::button::text)
+    .padding([0, 6]);
+
+    let info = column![
+        text(name).size(14).color(name_color),
+        text(meta).size(11).color(theme::subtext()),
+    ]
+    .spacing(2)
+    .width(Length::Fill);
+
+    let play = button(info)
+        .on_press(Message::PlayStation(st.clone()))
+        .style(iced::widget::button::text)
+        .width(Length::Fill)
+        .padding([6, 12]);
+
+    let row_inner = row![play, star]
+        .align_y(Alignment::Center)
+        .padding([0, 6]);
+
+    let styled: Element<'static, Message> = if is_current {
+        container(row_inner)
+            .style(|_| iced::widget::container::Style {
+                background: Some(iced::Background::Color(theme::with_alpha(theme::accent(), 0.08))),
+                ..Default::default()
+            })
+            .width(Length::Fill)
+            .into()
+    } else {
+        container(row_inner).width(Length::Fill).into()
+    };
+    styled
 }
 
 // ── Track list ────────────────────────────────────────────────────────────────
