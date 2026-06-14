@@ -15,7 +15,6 @@ pub struct Config {
     pub language: String,
     pub seek_step: u64,
     pub volume_step: f32,
-    pub play_on_click: bool,
 }
 
 impl Default for Config {
@@ -28,7 +27,6 @@ impl Default for Config {
             language: "auto".into(),
             seek_step: 5,
             volume_step: 0.05,
-            play_on_click: true,
         }
     }
 }
@@ -99,7 +97,7 @@ const DEFAULT_CONFIG: &str = r#"# lavanda — configuration file
 #
 # All fields are optional. Missing fields use the defaults shown here.
 
-# Path to your music library. Subdirectories are shown as folders in the sidebar.
+# Path to your music library. Scanned on launch and browsed by artist/album/genre.
 music_dir = "~/Music"
 
 # Initial volume (0.0 = mute, 1.0 = 100%)
@@ -120,8 +118,4 @@ seek_step = 5
 
 # Volume delta per + / - keypress
 volume_step = 0.05
-
-# Play track immediately on click/Enter (true) or just move the cursor (false)
-# Toggle at runtime with the i key
-play_on_click = true
 "#;
