@@ -9,18 +9,21 @@ use crate::persist::TableColumn;
 use crate::ui::{icons, theme};
 
 const ROW_H: f32 = 34.0;
+/// Largura da coluna de favorito (coração), compartilhada entre header e linhas.
+const LIKE_COL_W: f32 = 60.0;
 
 pub fn view(state: &AppState) -> Element<'_, Message> {
     let sidebar = sidebar_view(state);
 
     let drag_handle = mouse_area(
-        container(Space::new(Length::Fixed(4.0), Length::Fill)).style(|_| {
+        container(Space::new(Length::Fixed(8.0), Length::Fill)).style(|_| {
             iced::widget::container::Style {
                 background: Some(iced::Background::Color(theme::surface0())),
                 ..Default::default()
             }
         }),
     )
+    .interaction(iced::mouse::Interaction::ResizingHorizontally)
     .on_press(Message::SidebarDragStart);
 
     let track_list = track_list_view(state);
@@ -39,7 +42,7 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
         let color = if active { theme::accent() } else { theme::subtext() };
         button(
             row![
-                text(icon).font(icons::NERD_FONT_MONO).size(12).color(color),
+                text(icon).font(icons::NERD_FONT_MONO).size(24).color(color),
                 text(label).size(12).color(color),
             ]
             .spacing(4)
@@ -61,7 +64,7 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
     let sidebar_search = row![
         text(icons::ICON_SEARCH)
             .font(icons::NERD_FONT_MONO)
-            .size(11)
+            .size(22)
             .color(theme::overlay0()),
         text_input("Filter…", &state.sidebar_search)
             .on_input(Message::SidebarSearchChanged)
@@ -108,7 +111,7 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
 
     let pl_resize = mouse_area(
         container(
-            container(Space::new(Length::Fill, Length::Fixed(3.0))).style(move |_| {
+            container(Space::new(Length::Fill, Length::Fixed(8.0))).style(move |_| {
                 iced::widget::container::Style {
                     background: Some(iced::Background::Color(theme::surface0())),
                     ..Default::default()
@@ -117,9 +120,8 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
         )
         .padding([2, 0]),
     )
-    .on_press(Message::PlaylistDragStart)
-    .on_enter(Message::HoverPlaylistResizer(true))
-    .on_exit(Message::HoverPlaylistResizer(false));
+    .interaction(iced::mouse::Interaction::ResizingVertically)
+    .on_press(Message::PlaylistDragStart);
 
     let sidebar_body = column![
         container(tabs).padding([4, 4]),
@@ -218,7 +220,7 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
         button(
             text(icons::ICON_PLUS)
                 .font(icons::NERD_FONT_MONO)
-                .size(13)
+                .size(26)
                 .color(theme::accent()),
         )
         .on_press(Message::OpenPlaylistDialog(PlaylistDialogMode::Create))
@@ -256,7 +258,7 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
                         button(
                             text(icons::ICON_TRASH)
                                 .font(icons::NERD_FONT_MONO)
-                                .size(11)
+                                .size(22)
                                 .color(theme::red()),
                         )
                         .on_press(Message::DeletePlaylist(pl.clone()))
@@ -308,7 +310,7 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
                 let is_sel = selected_pl.as_deref() == Some(name);
                 let pl_btn = button(
                     row![
-                        text(icon).font(icons::NERD_FONT_MONO).size(11).color(color),
+                        text(icon).font(icons::NERD_FONT_MONO).size(22).color(color),
                         text(name)
                             .size(12)
                             .color(if is_sel { theme::accent() } else { theme::text() }),
@@ -392,13 +394,11 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
     let sort_asc = state.sort_ascending;
     let group = state.group_by_album;
 
+    // Toolbar (busca) e cabeçalho de colunas ficam fixos no topo, fora do scroll.
+    let toolbar = toolbar_view(state);
+    let header = build_column_header(visible_cols.clone(), col_widths.clone(), sort_col, sort_asc);
+
     let mut rows: Vec<Element<Message>> = Vec::new();
-
-    // Column header row
-    rows.push(build_column_header(visible_cols.clone(), col_widths.clone(), sort_col, sort_asc));
-
-    // Toolbar
-    rows.push(toolbar_view(state));
 
     let current_id = state.current_track.as_ref().map(|t| t.id);
     let selected_ids: Vec<i64> = state.selected_tracks.iter().map(|t| t.id).collect();
@@ -423,7 +423,7 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
                 row![
                     text(icons::ICON_LIST)
                         .font(icons::NERD_FONT_MONO)
-                        .size(11)
+                        .size(22)
                         .color(theme::accent()),
                     text(album_label)
                         .size(12)
@@ -466,8 +466,13 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
         }
     }
 
-    let content = scrollable(column(rows).spacing(0))
+    let scroll = scrollable(column(rows).spacing(0))
         .id(scrollable::Id::new("tracklist_scroll"))
+        .height(Length::Fill);
+
+    let content = column![toolbar, header, scroll]
+        .spacing(0)
+        .width(Length::Fill)
         .height(Length::Fill);
 
     mouse_area(container(content).width(Length::Fill).height(Length::Fill))
@@ -498,7 +503,7 @@ fn build_column_header(
             let hdr_btn = button(text(label).size(11).color(color).font(icons::UI_FONT_BOLD))
                 .on_press(Message::SortBy(sc))
                 .style(iced::widget::button::text)
-                .padding([4, 4])
+                .padding([4, 0])
                 .width(w);
 
             mouse_area(hdr_btn)
@@ -509,7 +514,14 @@ fn build_column_header(
         })
         .collect();
 
-    container(row(header_cells).spacing(0).align_y(Alignment::Center))
+    // Célula vazia final equivalente à coluna de favorito nas linhas de faixa,
+    // para que as colunas FillPortion resolvam à mesma largura nos dois lugares.
+    let header_row = row(header_cells)
+        .push(Space::with_width(Length::Fixed(LIKE_COL_W)))
+        .spacing(0)
+        .align_y(Alignment::Center);
+
+    container(header_row)
         .style(|_| iced::widget::container::Style {
             background: Some(iced::Background::Color(theme::mantle())),
             ..Default::default()
@@ -525,7 +537,7 @@ fn toolbar_view(state: &AppState) -> Element<'_, Message> {
     let search_input: Element<Message> = row![
         text(icons::ICON_SEARCH)
             .font(icons::NERD_FONT_MONO)
-            .size(12)
+            .size(24)
             .color(theme::overlay0()),
         text_input("Search…", &state.search_query)
             .on_input(Message::SearchChanged)
@@ -541,7 +553,7 @@ fn toolbar_view(state: &AppState) -> Element<'_, Message> {
     let group_color = if state.group_by_album { theme::accent() } else { theme::subtext() };
     let group_btn = button(
         row![
-            text(icons::ICON_LIST).font(icons::NERD_FONT_MONO).size(11).color(group_color),
+            text(icons::ICON_LIST).font(icons::NERD_FONT_MONO).size(22).color(group_color),
             text("Album").size(11).color(group_color),
         ]
         .spacing(3)
@@ -648,15 +660,16 @@ fn build_track_row(
         button(
             text(icons::ICON_HEART)
                 .font(icons::NERD_FONT_MONO)
-                .size(11)
+                .size(22)
                 .color(if liked { theme::red() } else { theme::with_alpha(theme::overlay0(), 0.5) }),
         )
         .on_press(like_msg)
         .style(iced::widget::button::text)
+        .width(Length::Fixed(LIKE_COL_W))
         .padding([0, 4])
         .into()
     } else {
-        Space::with_width(20).into()
+        Space::with_width(Length::Fixed(LIKE_COL_W)).into()
     };
 
     let track_row_inner = row(cells)
@@ -716,10 +729,10 @@ fn column_widths(cols: &[TableColumn]) -> Vec<Length> {
             TableColumn::Artist => Length::FillPortion(3),
             TableColumn::Album => Length::FillPortion(3),
             TableColumn::Genre => Length::FillPortion(2),
-            TableColumn::Year => Length::Fixed(44.0),
-            TableColumn::DiscNumber => Length::Fixed(36.0),
-            TableColumn::Duration => Length::Fixed(52.0),
-            TableColumn::Plays => Length::Fixed(44.0),
+            TableColumn::Year => Length::Fixed(48.0),
+            TableColumn::DiscNumber => Length::Fixed(44.0),
+            TableColumn::Duration => Length::Fixed(78.0),
+            TableColumn::Plays => Length::Fixed(56.0),
             TableColumn::DatePlayed => Length::Fixed(110.0),
         })
         .collect()

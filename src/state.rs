@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Default)]
 pub struct SavedState {
     pub volume: Option<f32>,
-    pub last_folder: Option<PathBuf>,
 }
 
 fn state_path() -> PathBuf {

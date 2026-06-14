@@ -10,7 +10,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         let like_btn = button(
             text(icons::ICON_HEART)
                 .font(icons::NERD_FONT_MONO)
-                .size(15)
+                .size(30)
                 .color(if track.liked { theme::red() } else { theme::overlay0() }),
         )
         .on_press(Message::KeyboardLike)
@@ -81,7 +81,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             text(icons::ICON_MUSIC)
                 .font(icons::NERD_FONT_MONO)
                 .color(theme::overlay0())
-                .size(48),
+                .size(96),
         )
         .width(180)
         .height(180)

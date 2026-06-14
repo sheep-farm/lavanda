@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use iced::widget::{container, text_input};
-use iced::{Border, Color, Shadow, Vector};
+use iced::{Border, Color};
 
 // ── Paleta ───────────────────────────────────────────────────────────────────
 
@@ -261,18 +261,6 @@ pub fn selected_row(_: &iced::Theme) -> container::Style {
     }
 }
 
-pub fn cursor_row(_: &iced::Theme) -> container::Style {
-    container::Style {
-        background: Some(iced::Background::Color(with_alpha(surface0(), 0.7))),
-        border: Border {
-            color: with_alpha(accent(), 0.6),
-            width: 1.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
 pub fn player_panel(_: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(iced::Background::Color(mantle())),
@@ -294,48 +282,6 @@ pub fn album_header(_: &iced::Theme) -> container::Style {
             radius: 0.0.into(),
         },
         ..Default::default()
-    }
-}
-
-pub fn modal_backdrop(_: &iced::Theme) -> container::Style {
-    container::Style {
-        background: Some(iced::Background::Color(Color {
-            r: 0.0,
-            g: 0.0,
-            b: 0.0,
-            a: 0.6,
-        })),
-        ..Default::default()
-    }
-}
-
-pub fn dialog_card(_: &iced::Theme) -> container::Style {
-    container::Style {
-        background: Some(iced::Background::Color(mantle())),
-        border: Border {
-            color: surface0(),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        shadow: Shadow {
-            color: Color {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 0.5,
-            },
-            offset: Vector { x: 0.0, y: 4.0 },
-            blur_radius: 20.0,
-        },
-        ..Default::default()
-    }
-}
-
-pub fn spectrum_bar_color(amplitude: f32) -> Color {
-    if amplitude < 0.5 {
-        lerp_color(green(), accent(), amplitude * 2.0)
-    } else {
-        lerp_color(accent(), red(), (amplitude - 0.5) * 2.0)
     }
 }
 

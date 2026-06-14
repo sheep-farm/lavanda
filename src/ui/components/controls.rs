@@ -21,7 +21,7 @@ pub fn playback_controls<'a>(
             text(icon)
                 .font(icons::NERD_FONT_MONO)
                 .color(theme::text())
-                .size(20),
+                .size(40),
         )
         .on_press(msg)
         .style(iced::widget::button::text)
@@ -48,7 +48,7 @@ pub fn playback_controls<'a>(
             text(icons::ICON_SHUFFLE)
                 .font(icons::NERD_FONT_MONO)
                 .color(shuffle_color)
-                .size(18),
+                .size(36),
         )
         .on_press(Message::ToggleShuffle)
         .style(iced::widget::button::text)
@@ -60,7 +60,7 @@ pub fn playback_controls<'a>(
             text(icons::ICON_REPEAT)
                 .font(icons::NERD_FONT_MONO)
                 .color(repeat_color)
-                .size(18),
+                .size(36),
         )
         .on_press(Message::ToggleRepeat)
         .style(iced::widget::button::text)
@@ -69,7 +69,7 @@ pub fn playback_controls<'a>(
         text(icons::ICON_VOL_UP)
             .font(icons::NERD_FONT_MONO)
             .color(theme::subtext())
-            .size(18),
+            .size(36),
         vol_slider,
     ]
     .spacing(4)

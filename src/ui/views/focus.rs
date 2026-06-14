@@ -1,4 +1,4 @@
-use iced::widget::{column, container, image, row, text, Space};
+use iced::widget::{button, column, container, image, row, text, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{AppState, Message};
@@ -22,7 +22,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
             text(icons::ICON_MUSIC)
                 .font(icons::NERD_FONT_MONO)
                 .color(theme::overlay0())
-                .size(48),
+                .size(96),
         )
         .width(160)
         .height(160)
@@ -33,8 +33,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     };
 
     let track_info: Element<Message> = if let Some(track) = &state.current_track {
-        column![
-            text(&track.artist).color(theme::subtext()).size(13),
+        let title_row = row![
             text(&track.title)
                 .color(theme::text())
                 .size(22)
@@ -42,6 +41,22 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
                     weight: iced::font::Weight::Bold,
                     ..icons::UI_FONT
                 }),
+            button(
+                text(icons::ICON_HEART)
+                    .font(icons::NERD_FONT_MONO)
+                    .size(30)
+                    .color(if track.liked { theme::red() } else { theme::overlay0() }),
+            )
+            .on_press(Message::KeyboardLike)
+            .style(iced::widget::button::text)
+            .padding([0, 6]),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+        column![
+            text(&track.artist).color(theme::subtext()).size(13),
+            title_row,
             text(format!(
                 "{} · {}",
                 track.album,

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -20,12 +19,6 @@ use crate::ui::{theme, views};
 type Shared<T> = Arc<Mutex<Option<UnboundedReceiver<T>>>>;
 
 // ── Enums de navegação ────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Focus {
-    Sidebar,
-    TrackList,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Layout {
@@ -115,13 +108,10 @@ pub struct TagEditorState {
 #[derive(Debug, Clone)]
 pub enum Message {
     // Biblioteca
-    SelectFolder(PathBuf),
-    FolderScanned(PathBuf, Vec<Track>),
     LibraryScanned(Vec<Track>),
     RescanLibrary,
 
     // Reprodução
-    PlayTrack(Track),
     PlayPause,
     NextTrack,
     PreviousTrack,
@@ -131,9 +121,6 @@ pub enum Message {
     VolumeStep(f32),
     ToggleShuffle,
     ToggleRepeat,
-
-    // Capa
-    CoverLoaded(PathBuf, Option<Vec<u8>>),
 
     // Sidebar drag
     SidebarDragStart,
@@ -168,7 +155,6 @@ pub enum Message {
     DoubleClickPlaylist(String),
 
     // Player navigation
-    ReturnToActiveSource,
     FocusSongName,
     FocusArtistName,
     FocusAlbumName,
@@ -201,9 +187,7 @@ pub enum Message {
     PlaylistDialogToggleAddAlbum(bool),
     PlaylistDialogSubmit,
     DeletePlaylist(String),
-    RenamePlaylist(String, String),
     AddTracksToPlaylist(String, Vec<Track>),
-    AddAlbumToPlaylist(String, String),
     CreatePlaylistFromContext(String, bool),
     CreatePlaylistWithTracks(String, Vec<Track>),
 
@@ -238,9 +222,6 @@ pub enum Message {
     // Hover / UI
     HoverTracklist(bool),
     HoverSidebarList(bool),
-    HoverSidebarResizer(bool),
-    HoverPlaylistResizer(bool),
-    HoverPlaylist(Option<String>),
 
     // Group by album
     ToggleGroupByAlbum,
@@ -282,14 +263,10 @@ pub struct AppState {
     pub volume: f32,
     pub shuffle: bool,
     pub repeat: bool,
-    pub current_track_play_counted: bool,
 
     // Biblioteca
     pub all_tracks: Vec<Track>,
     pub tracks: Vec<Track>,
-    pub folders: Vec<PathBuf>,
-    pub selected_folder: Option<PathBuf>,
-    folder_cache: HashMap<PathBuf, Vec<Track>>,
 
     // ViewMode
     pub view_mode: ViewMode,
@@ -335,7 +312,6 @@ pub struct AppState {
 
     // Context menu
     pub show_context_menu: Option<ContextMenuTarget>,
-    pub hovered_playlist: Option<String>,
 
     // Hidden items
     pub hidden_artists_albums: Vec<(String, bool)>,
@@ -349,8 +325,6 @@ pub struct AppState {
     // Sidebar
     pub sidebar_width: f32,
     dragging_sidebar: bool,
-    pub is_hovering_sidebar_resizer: bool,
-    pub is_hovering_playlist_resizer: bool,
     pub is_hovering_tracklist: bool,
     pub is_hovering_sidebar_list: bool,
 
@@ -419,12 +393,8 @@ impl AppState {
             volume,
             shuffle: cfg.shuffle,
             repeat: cfg.repeat,
-            current_track_play_counted: false,
             all_tracks: Vec::new(),
             tracks: Vec::new(),
-            folders: Vec::new(),
-            selected_folder: None,
-            folder_cache: HashMap::new(),
             view_mode: ViewMode::Artists,
             selected_artist: None,
             selected_album: None,
@@ -452,7 +422,6 @@ impl AppState {
             show_tag_editor: None,
             playlist_dialog: None,
             show_context_menu: None,
-            hovered_playlist: None,
             hidden_artists_albums: hidden,
             playlist_height: 141.0,
             playlist_height_initialized: false,
@@ -460,8 +429,6 @@ impl AppState {
             window_height: 640.0,
             sidebar_width: load_sidebar_width(),
             dragging_sidebar: false,
-            is_hovering_sidebar_resizer: false,
-            is_hovering_playlist_resizer: false,
             is_hovering_tracklist: false,
             is_hovering_sidebar_list: false,
             show_shortcuts: false,
@@ -484,7 +451,6 @@ impl AppState {
     fn persist_state(&self) {
         crate::state::save(&crate::state::SavedState {
             volume: Some(self.volume),
-            last_folder: self.selected_folder.clone(),
         });
     }
 
@@ -668,17 +634,6 @@ impl AppState {
 
             Message::LibraryScanned(tracks) => {
                 self.all_tracks = tracks;
-                // Rebuild folder_cache from track paths
-                let mut cache: HashMap<PathBuf, Vec<Track>> = HashMap::new();
-                for track in &self.all_tracks {
-                    if let Some(parent) = track.path.parent() {
-                        cache.entry(parent.to_path_buf()).or_default().push(track.clone());
-                    }
-                }
-                self.folder_cache = cache;
-                let mut keys: Vec<PathBuf> = self.folder_cache.keys().cloned().collect();
-                keys.sort();
-                self.folders = keys;
                 // Auto-select first artist
                 if self.selected_artist.is_none() {
                     self.selected_artist = self.artists().first().cloned();
@@ -691,68 +646,6 @@ impl AppState {
             Message::RescanLibrary => {
                 let music_dir = crate::config::get().music_path();
                 Task::perform(async move { scan_folder(&music_dir) }, Message::LibraryScanned)
-            }
-
-            Message::SelectFolder(path) => {
-                self.selected_folder = Some(path.clone());
-                self.selected_playlist = None;
-                self.selected_artist = None;
-                self.selected_album = None;
-                self.selected_genre = None;
-                self.search_query.clear();
-                if let Some(cached) = self.folder_cache.get(&path) {
-                    self.tracks = cached.clone();
-                    return Task::none();
-                }
-                let p = path.clone();
-                Task::perform(
-                    async move {
-                        tokio::task::spawn_blocking(move || scan_folder(&p))
-                            .await
-                            .unwrap_or_default()
-                    },
-                    move |tracks| Message::FolderScanned(path.clone(), tracks),
-                )
-            }
-
-            Message::FolderScanned(path, tracks) => {
-                if !tracks.is_empty() {
-                    self.folder_cache.insert(path.clone(), tracks.clone());
-                    if self.selected_folder.as_ref() == Some(&path) {
-                        self.tracks = tracks;
-                    }
-                }
-                self.persist_state();
-                Task::none()
-            }
-
-            Message::CoverLoaded(path, cover) => {
-                if let Some(track) = &mut self.current_track {
-                    if track.path == path {
-                        track.cover_data = cover.clone();
-                        if let Some(data) = cover {
-                            let cp = cache_cover_path();
-                            if let Some(dir) = cp.parent() { std::fs::create_dir_all(dir).ok(); }
-                            if std::fs::write(&cp, &data).is_ok() {
-                                let art_url = format!("file://{}", cp.display());
-                                let t = track.clone();
-                                self.send_mpris(MprisUpdate::Metadata {
-                                    title: t.title,
-                                    artist: t.artist,
-                                    album: t.album,
-                                    duration_us: t.duration.as_micros() as i64,
-                                    art_url: Some(art_url),
-                                });
-                            }
-                        }
-                    }
-                }
-                Task::none()
-            }
-
-            Message::PlayTrack(track) => {
-                self.queue = self.tracks.clone();
-                self.play_track_internal(track)
             }
 
             Message::PlayPause => match self.playback_state {
@@ -860,7 +753,6 @@ impl AppState {
             Message::SelectViewMode(mode) => {
                 self.view_mode = mode;
                 self.selected_playlist = None;
-                self.selected_folder = None;
                 self.selected_artist = None;
                 self.selected_album = None;
                 self.selected_genre = None;
@@ -885,7 +777,6 @@ impl AppState {
                 self.last_click_artist = Some((artist.clone(), now));
                 self.selected_artist = Some(artist);
                 self.selected_playlist = None;
-                self.selected_folder = None;
                 self.selected_album = None;
                 self.search_query.clear();
                 self.update_filtered_tracks();
@@ -903,7 +794,6 @@ impl AppState {
                 self.last_click_album = Some((album.clone(), now));
                 self.selected_album = Some(album);
                 self.selected_playlist = None;
-                self.selected_folder = None;
                 self.selected_artist = None;
                 self.search_query.clear();
                 self.update_filtered_tracks();
@@ -921,7 +811,6 @@ impl AppState {
                 self.last_click_genre = Some((genre.clone(), now));
                 self.selected_genre = Some(genre);
                 self.selected_playlist = None;
-                self.selected_folder = None;
                 self.selected_artist = None;
                 self.selected_album = None;
                 self.search_query.clear();
@@ -939,7 +828,6 @@ impl AppState {
                 }
                 self.last_click_playlist = Some((name.clone(), now));
                 self.selected_playlist = Some(name);
-                self.selected_folder = None;
                 self.search_query.clear();
                 self.update_filtered_tracks();
                 Task::none()
@@ -950,7 +838,6 @@ impl AppState {
                 self.selected_artist = None;
                 self.selected_album = None;
                 self.selected_genre = None;
-                self.selected_folder = None;
                 self.search_query.clear();
                 match tab {
                     PlaylistTab::Playlists => {
@@ -977,7 +864,6 @@ impl AppState {
                 self.view_mode = ViewMode::Artists;
                 self.selected_artist = Some(artist);
                 self.selected_playlist = None;
-                self.selected_folder = None;
                 self.selected_album = None;
                 self.search_query.clear();
                 self.update_filtered_tracks();
@@ -994,7 +880,6 @@ impl AppState {
                 self.view_mode = ViewMode::Albums;
                 self.selected_album = Some(album);
                 self.selected_playlist = None;
-                self.selected_folder = None;
                 self.selected_artist = None;
                 self.search_query.clear();
                 self.update_filtered_tracks();
@@ -1007,7 +892,6 @@ impl AppState {
                 self.view_mode = ViewMode::Genres;
                 self.selected_genre = Some(genre);
                 self.selected_playlist = None;
-                self.selected_folder = None;
                 self.search_query.clear();
                 self.update_filtered_tracks();
                 self.queue = self.tracks.clone();
@@ -1015,8 +899,12 @@ impl AppState {
             }
 
             Message::DoubleClickPlaylist(playlist) => {
+                // Playlists customizadas: clique duplo renomeia. Autoplaylists: toca.
+                let is_custom = crate::persist::get(|db| db.playlists.contains_key(&playlist));
+                if is_custom {
+                    return Task::done(Message::OpenPlaylistDialog(PlaylistDialogMode::Rename(playlist)));
+                }
                 self.selected_playlist = Some(playlist);
-                self.selected_folder = None;
                 self.search_query.clear();
                 self.update_filtered_tracks();
                 self.queue = self.tracks.clone();
@@ -1025,33 +913,12 @@ impl AppState {
 
             // ── Player navigation ─────────────────────────────────────────────
 
-            Message::ReturnToActiveSource => {
-                if let Some(current) = self.current_track.clone() {
-                    self.view_mode = ViewMode::Albums;
-                    self.selected_album = Some(current.album.clone());
-                    self.selected_playlist = None;
-                    self.selected_folder = None;
-                    self.selected_artist = None;
-                    self.search_query.clear();
-                    self.update_filtered_tracks();
-                    self.selected_track = Some(current.clone());
-                    if let Some(y) = self.calculate_scroll_offset(current.id) {
-                        return iced::widget::scrollable::scroll_to(
-                            iced::widget::scrollable::Id::new("tracklist_scroll"),
-                            iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: (y - 120.0).max(0.0) },
-                        );
-                    }
-                }
-                Task::none()
-            }
-
             Message::FocusSongName | Message::FocusAlbumName => {
                 if let Some(current) = self.current_track.clone() {
                     self.view_mode = ViewMode::Albums;
                     self.selected_album = Some(current.album.clone());
                     self.selected_playlist = None;
-                    self.selected_folder = None;
-                    self.selected_artist = None;
+                        self.selected_artist = None;
                     self.search_query.clear();
                     self.update_filtered_tracks();
                     self.selected_track = Some(current.clone());
@@ -1070,8 +937,7 @@ impl AppState {
                     self.view_mode = ViewMode::Artists;
                     self.selected_artist = Some(current.artist.clone());
                     self.selected_playlist = None;
-                    self.selected_folder = None;
-                    self.selected_album = None;
+                        self.selected_album = None;
                     self.search_query.clear();
                     self.update_filtered_tracks();
                 }
@@ -1258,25 +1124,8 @@ impl AppState {
                 Task::none()
             }
 
-            Message::RenamePlaylist(old, new) => {
-                crate::persist::rename_playlist(old.clone(), new.clone());
-                if self.selected_playlist.as_ref() == Some(&old) {
-                    self.selected_playlist = Some(new);
-                }
-                self.update_filtered_tracks();
-                Task::none()
-            }
-
             Message::AddTracksToPlaylist(pl, tracks) => {
                 for t in tracks { crate::persist::add_to_playlist(pl.clone(), t.path); }
-                self.show_context_menu = None;
-                self.update_filtered_tracks();
-                Task::none()
-            }
-
-            Message::AddAlbumToPlaylist(album, pl) => {
-                let album_tracks: Vec<_> = self.all_tracks.iter().filter(|t| t.album == album).cloned().collect();
-                for t in album_tracks { crate::persist::add_to_playlist(pl.clone(), t.path); }
                 self.show_context_menu = None;
                 self.update_filtered_tracks();
                 Task::none()
@@ -1485,9 +1334,6 @@ impl AppState {
 
             Message::HoverTracklist(v) => { self.is_hovering_tracklist = v; Task::none() }
             Message::HoverSidebarList(v) => { self.is_hovering_sidebar_list = v; Task::none() }
-            Message::HoverSidebarResizer(v) => { self.is_hovering_sidebar_resizer = v; Task::none() }
-            Message::HoverPlaylistResizer(v) => { self.is_hovering_playlist_resizer = v; Task::none() }
-            Message::HoverPlaylist(name) => { self.hovered_playlist = name; Task::none() }
 
             // ── Columns ───────────────────────────────────────────────────────
 
@@ -1684,20 +1530,6 @@ impl AppState {
                 AudioEvent::Progress { position, duration } => {
                     self.position = position;
                     self.duration = duration;
-                    // Contabiliza play ao atingir metade da faixa
-                    if !self.current_track_play_counted
-                        && duration > Duration::ZERO
-                        && position >= duration / 2
-                    {
-                        if let Some(ref mut track) = self.current_track {
-                            let count = crate::persist::increment_play_count(track.path.clone());
-                            track.play_count = count;
-                            let path = track.path.clone();
-                            for t in self.all_tracks.iter_mut().filter(|t| t.path == path) { t.play_count = count; }
-                            for t in self.tracks.iter_mut().filter(|t| t.path == path) { t.play_count = count; }
-                        }
-                        self.current_track_play_counted = true;
-                    }
                     Task::none()
                 }
                 AudioEvent::Paused => { self.playback_state = PlaybackState::Paused; Task::none() }
@@ -1849,7 +1681,7 @@ impl AppState {
                 text(crate::ui::icons::ICON_MUSIC)
                     .font(crate::ui::icons::NERD_FONT_MONO)
                     .color(theme::accent())
-                    .size(16),
+                    .size(32),
                 Space::with_width(6),
                 text("lavanda")
                     .color(theme::accent())
@@ -1881,7 +1713,7 @@ impl AppState {
             row![
                 text("Keyboard Shortcuts").size(18).font(crate::ui::icons::UI_FONT_BOLD).color(theme::accent()),
                 Space::with_width(Length::Fill),
-                button(text(crate::ui::icons::ICON_CLOSE).font(crate::ui::icons::NERD_FONT_MONO).color(theme::red()).size(16))
+                button(text(crate::ui::icons::ICON_CLOSE).font(crate::ui::icons::NERD_FONT_MONO).color(theme::red()).size(32))
                     .on_press(Message::CloseShortcuts).style(iced::widget::button::text),
             ].align_y(Alignment::Center),
             Space::with_height(16),
@@ -2045,7 +1877,7 @@ impl AppState {
                             text(if visible { "" } else { "" })
                                 .font(crate::ui::icons::NERD_FONT_MONO)
                                 .color(if visible { theme::accent() } else { theme::overlay0() })
-                                .size(14),
+                                .size(28),
                             text(c.label()).size(13).color(theme::text()),
                         ].spacing(8))
                         .on_press(Message::ToggleColumnVisibility(c))
@@ -2071,7 +1903,7 @@ impl AppState {
             row![
                 text(title).size(13).font(crate::ui::icons::UI_FONT_BOLD).color(theme::accent()),
                 Space::with_width(Length::Fill),
-                button(text(crate::ui::icons::ICON_CLOSE).font(crate::ui::icons::NERD_FONT_MONO).color(theme::red()).size(13))
+                button(text(crate::ui::icons::ICON_CLOSE).font(crate::ui::icons::NERD_FONT_MONO).color(theme::red()).size(26))
                     .on_press(Message::ToggleContextMenu(None)).style(iced::widget::button::text),
             ].align_y(Alignment::Center),
             Space::with_height(8),
@@ -2165,11 +1997,18 @@ impl AppState {
         self.playback_state = PlaybackState::Playing;
         self.position = Duration::ZERO;
         self.duration = Duration::ZERO;
-        self.current_track_play_counted = false;
         self.notify_mpris_track(PlaybackStatus::Playing);
         self.persist_state();
 
         crate::persist::add_to_recently_played(track.path.clone());
+
+        // Contabiliza a reprodução ao iniciar a faixa.
+        let count = crate::persist::increment_play_count(track.path.clone());
+        let path = track.path.clone();
+        for t in self.all_tracks.iter_mut().filter(|t| t.path == path) { t.play_count = count; }
+        for t in self.tracks.iter_mut().filter(|t| t.path == path) { t.play_count = count; }
+        if let Some(ref mut ct) = self.current_track { ct.play_count = count; }
+
         if self.selected_playlist.as_deref() == Some("Recently Played") {
             self.update_filtered_tracks();
         }

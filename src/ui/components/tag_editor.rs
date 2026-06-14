@@ -39,7 +39,7 @@ pub fn view(state: &TagEditorState) -> Element<'_, Message> {
             .width(Length::Fill),
         button(
             row![
-                text(icons::ICON_SEARCH).font(icons::NERD_FONT_MONO).size(12).color(theme::text()),
+                text(icons::ICON_SEARCH).font(icons::NERD_FONT_MONO).size(24).color(theme::text()),
                 text("Online").size(12).color(theme::text()),
             ]
             .spacing(4)
@@ -86,7 +86,7 @@ pub fn view(state: &TagEditorState) -> Element<'_, Message> {
     .into();
 
     let hint: Element<Message> = row![
-        text(icons::ICON_EDIT).font(icons::NERD_FONT_MONO).size(11).color(theme::overlay0()),
+        text(icons::ICON_EDIT).font(icons::NERD_FONT_MONO).size(22).color(theme::overlay0()),
         text("Check boxes to enable each field. Unchecked fields are not written.")
             .size(11)
             .color(theme::overlay0()),
@@ -101,7 +101,7 @@ pub fn view(state: &TagEditorState) -> Element<'_, Message> {
                 text("Edit Tags").size(16).font(icons::UI_FONT_BOLD).color(theme::accent()),
                 Space::with_width(Length::Fill),
                 button(
-                    text(icons::ICON_CLOSE).font(icons::NERD_FONT_MONO).color(theme::red()).size(14),
+                    text(icons::ICON_CLOSE).font(icons::NERD_FONT_MONO).color(theme::red()).size(28),
                 )
                 .on_press(Message::CloseTagEditor)
                 .style(iced::widget::button::text),
