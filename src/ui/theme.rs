@@ -331,6 +331,44 @@ pub fn dialog_card(_: &iced::Theme) -> container::Style {
     }
 }
 
+pub fn spectrum_bar_color(amplitude: f32) -> Color {
+    if amplitude < 0.5 {
+        lerp_color(green(), accent(), amplitude * 2.0)
+    } else {
+        lerp_color(accent(), red(), (amplitude - 0.5) * 2.0)
+    }
+}
+
+pub fn primary_button(_: &iced::Theme, status: iced::widget::button::Status) -> iced::widget::button::Style {
+    let is_hovered = matches!(
+        status,
+        iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
+    );
+    iced::widget::button::Style {
+        background: Some(iced::Background::Color(if is_hovered {
+            lerp_color(accent(), text(), 0.15)
+        } else {
+            accent()
+        })),
+        text_color: base(),
+        border: Border { radius: 4.0.into(), ..Default::default() },
+        ..Default::default()
+    }
+}
+
+pub fn secondary_button(_: &iced::Theme, status: iced::widget::button::Status) -> iced::widget::button::Style {
+    let is_hovered = matches!(
+        status,
+        iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
+    );
+    iced::widget::button::Style {
+        background: Some(iced::Background::Color(if is_hovered { surface0() } else { mantle() })),
+        text_color: text(),
+        border: Border { radius: 4.0.into(), width: 1.0, color: surface0() },
+        ..Default::default()
+    }
+}
+
 pub fn dialog_input(_: &iced::Theme, status: text_input::Status) -> text_input::Style {
     let border_color = match status {
         text_input::Status::Focused => accent(),

@@ -13,19 +13,12 @@ const AUDIO_EXTENSIONS: &[&str] = &[
 ];
 
 const COVER_FILENAMES: &[&str] = &[
-    "cover.jpg",
-    "Cover.jpg",
-    "cover.png",
-    "Cover.png",
-    "cover.webp",
-    "Cover.webp",
-    "folder.jpg",
-    "Folder.jpg",
-    "folder.png",
-    "Folder.png",
+    "cover.jpg", "Cover.jpg", "cover.png", "Cover.png",
+    "cover.webp", "Cover.webp", "folder.jpg", "Folder.jpg",
+    "folder.png", "Folder.png",
 ];
 
-/// Escaneia `dir` recursivamente e retorna as faixas ordenadas por álbum/número/título.
+/// Escaneia `dir` recursivamente e retorna faixas ordenadas por disco/álbum/número/título.
 /// `cover_data` é sempre `None` — carregado sob demanda via `load_cover`.
 pub fn scan_folder(dir: &Path) -> Vec<Track> {
     let mut pairs: Vec<(PathBuf, TrackInfo)> = WalkDir::new(dir)
@@ -46,6 +39,7 @@ pub fn scan_folder(dir: &Path) -> Vec<Track> {
     pairs.sort_by(|(_, a), (_, b)| {
         a.album
             .cmp(&b.album)
+            .then(a.disc_number.cmp(&b.disc_number))
             .then(a.track_number.cmp(&b.track_number))
             .then(a.title.cmp(&b.title))
     });
@@ -53,20 +47,33 @@ pub fn scan_folder(dir: &Path) -> Vec<Track> {
     pairs
         .into_iter()
         .enumerate()
-        .map(|(i, (path, info))| Track {
-            id: (i + 1) as i64,
-            path,
-            title: info.title,
-            artist: info.artist,
-            album: info.album,
-            track_number: info.track_number,
-            duration: Duration::from_millis(info.duration_ms),
-            cover_data: None,
+        .map(|(i, (path, info))| {
+            let (play_count, liked) = crate::persist::get(|db| {
+                let pc = db.play_counts.get(&path).copied().unwrap_or(0);
+                let l = db.favorites.contains(&path);
+                (pc, l)
+            });
+            Track {
+                id: (i + 1) as i64,
+                path,
+                title: info.title,
+                artist: info.artist,
+                album: info.album,
+                track_number: info.track_number,
+                disc_number: info.disc_number,
+                duration: Duration::from_millis(info.duration_ms),
+                cover_data: None,
+                genre: info.genre,
+                year: info.year,
+                play_count,
+                liked,
+                date_played: None,
+            }
         })
         .collect()
 }
 
-/// Carrega a capa de uma faixa: tag embutida primeiro, depois cover.jpg na pasta.
+/// Carrega a capa: tag embutida primeiro, depois arquivo de capa na pasta.
 pub fn load_cover(path: &Path) -> Option<Vec<u8>> {
     let tagged = Probe::open(path).ok()?.read().ok()?;
     let embedded = tagged.primary_tag().and_then(|t| {
@@ -90,7 +97,10 @@ struct TrackInfo {
     artist: String,
     album: String,
     track_number: Option<u32>,
+    disc_number: Option<u32>,
     duration_ms: u64,
+    genre: String,
+    year: Option<u32>,
 }
 
 fn read_tags(path: &Path) -> Result<TrackInfo> {
@@ -136,23 +146,38 @@ fn read_tags(path: &Path) -> Result<TrackInfo> {
         .unwrap_or(folder_album);
 
     let track_number = tags.and_then(|t| t.track());
+    let disc_number = tags.and_then(|t| t.disk());
+
+    let genre = tags
+        .and_then(|t| t.genre())
+        .map(|s| s.to_string())
+        .unwrap_or_default();
+
+    let year = tags.and_then(|t| t.year());
 
     Ok(TrackInfo {
         title,
         artist,
         album,
         track_number,
+        disc_number,
         duration_ms,
+        genre,
+        year,
     })
 }
 
-/// Escreve title/artist/album/track_number nos metadados do arquivo.
+/// Escreve metadados no arquivo de áudio.
 pub fn write_tags(
     path: &Path,
     title: &str,
     artist: &str,
     album: &str,
+    genre: &str,
     track_number: Option<u32>,
+    disc_number: Option<u32>,
+    cover_path: Option<&str>,
+    year: Option<u32>,
 ) -> Result<()> {
     use lofty::config::WriteOptions;
 
@@ -171,8 +196,38 @@ pub fn write_tags(
     tag.set_title(title.to_owned());
     tag.set_artist(artist.to_owned());
     tag.set_album(album.to_owned());
+    tag.set_genre(genre.to_owned());
+
     if let Some(n) = track_number {
         tag.set_track(n);
+    } else {
+        tag.remove_track();
+    }
+
+    if let Some(n) = disc_number {
+        tag.set_disk(n);
+    } else {
+        tag.remove_disk();
+    }
+
+    if let Some(y) = year {
+        tag.set_year(y);
+    }
+
+    if let Some(cp) = cover_path {
+        let cp = cp.trim();
+        if !cp.is_empty() {
+            if let Ok(data) = std::fs::read(cp) {
+                let mime = if cp.ends_with(".png") { "image/png" } else { "image/jpeg" };
+                let pic = lofty::picture::Picture::new_unchecked(
+                    lofty::picture::PictureType::CoverFront,
+                    Some(lofty::picture::MimeType::from_str(mime)),
+                    None,
+                    data,
+                );
+                tag.set_picture(0, pic);
+            }
+        }
     }
 
     tag.save_to_path(path, WriteOptions::default())?;

@@ -3,6 +3,7 @@ mod audio;
 mod config;
 mod library;
 mod locale;
+mod persist;
 mod state;
 mod ui;
 
@@ -57,5 +58,6 @@ fn main() -> iced::Result {
     config::load();
     locale::load();
     ui::theme::load_system_theme();
+    persist::init();
     app::run()
 }

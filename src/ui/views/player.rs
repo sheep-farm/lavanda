@@ -1,4 +1,4 @@
-use iced::widget::{column, container, image, row, text, Space};
+use iced::widget::{button, column, container, image, row, text, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{AppState, Message};
@@ -7,32 +7,60 @@ use crate::ui::{icons, theme};
 
 pub fn view(state: &AppState) -> Element<'_, Message> {
     let track_info: Element<Message> = if let Some(track) = &state.current_track {
-        column![
-            text(&track.artist).color(theme::subtext()).size(13),
+        let like_btn = button(
+            text(icons::ICON_HEART)
+                .font(icons::NERD_FONT_MONO)
+                .size(15)
+                .color(if track.liked { theme::red() } else { theme::overlay0() }),
+        )
+        .on_press(Message::KeyboardLike)
+        .style(iced::widget::button::text)
+        .padding([0, 4]);
+
+        let artist_btn = button(
+            text(&track.artist)
+                .color(theme::subtext())
+                .size(13),
+        )
+        .on_press(Message::FocusArtistName)
+        .style(iced::widget::button::text)
+        .padding(0);
+
+        let title_btn = button(
             text(&track.title)
                 .color(theme::text())
                 .size(20)
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..crate::ui::icons::UI_FONT
-                }),
-            text(format!(
-                "{} ({})",
-                track.album,
-                track
-                    .track_number
-                    .map(|n| n.to_string())
-                    .unwrap_or_default()
-            ))
-            .color(theme::subtext())
-            .size(13),
+                .font(icons::UI_FONT_BOLD),
+        )
+        .on_press(Message::FocusSongName)
+        .style(iced::widget::button::text)
+        .padding(0);
+
+        let album_label = format!(
+            "{} ({})",
+            track.album,
+            track.track_number.map(|n| n.to_string()).unwrap_or_default()
+        );
+        let album_btn = button(
+            text(album_label).color(theme::subtext()).size(13),
+        )
+        .on_press(Message::FocusAlbumName)
+        .style(iced::widget::button::text)
+        .padding(0);
+
+        row![
+            column![artist_btn, title_btn, album_btn,]
+                .spacing(4)
+                .width(Length::Fill),
+            like_btn,
         ]
-        .spacing(4)
+        .spacing(8)
+        .align_y(Alignment::Start)
         .into()
     } else {
         column![text(state.strings.no_track)
             .color(theme::overlay0())
-            .size(16),]
+            .size(16)]
         .into()
     };
 
@@ -77,7 +105,7 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
     ]
     .spacing(0);
 
-    let mut player_row = row![cover, Space::with_width(16),];
+    let mut player_row = row![cover, Space::with_width(16)];
 
     if state.show_spectrum {
         player_row = player_row

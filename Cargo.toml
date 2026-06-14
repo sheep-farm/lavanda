@@ -41,6 +41,12 @@ rand = "0.8"
 # FFT (visualizador de espectro)
 rustfft = "6"
 
+# Persistência (favorites, playlists, play counts)
+serde_json = "1"
+
+# Data/hora (recently played)
+chrono = { version = "0.4", features = ["serde"] }
+
 [profile.release]
 opt-level = "z"
 lto = true
