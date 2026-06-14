@@ -272,6 +272,8 @@ Known limitations:
 
 Version **1.0.1** is the product of **convergent evolution with [OmaTunes](https://github.com/Balthazzahr/omatunes)**, a sibling project by the same author that forked from an early lavanda and explored playlists, an indexed library, play counts and a richer tag editor. lavanda 1.0.1 folds those ideas back into the original codebase. The two projects share a common git ancestry and the same MIT license; parts of the library-state store (`persist.rs`) and the `Track` model originate from OmaTunes.
 
+The development model behind this — fork, diverge, and selectively reintegrate — is described in [DEVELOPMENT.md](DEVELOPMENT.md).
+
 ---
 
 ## License
