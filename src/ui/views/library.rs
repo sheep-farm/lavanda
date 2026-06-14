@@ -80,18 +80,18 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
             let items = state.artists();
             let selected = state.selected_artist.clone();
             let active = state.current_track.as_ref().map(|t| t.artist.clone());
-            build_sidebar_list(items, selected, active, Message::SelectArtist)
+            build_sidebar_list(items, selected, active, Message::SelectArtist, Some(ContextMenuTarget::Artist))
         }
         ViewMode::Albums => {
             let items = state.albums();
             let selected = state.selected_album.clone();
             let active = state.current_track.as_ref().map(|t| t.album.clone());
-            build_sidebar_list(items, selected, active, Message::SelectAlbum)
+            build_sidebar_list(items, selected, active, Message::SelectAlbum, Some(ContextMenuTarget::Album))
         }
         ViewMode::Genres => {
             let items = state.genres();
             let selected = state.selected_genre.clone();
-            build_sidebar_list(items, selected, None, Message::SelectGenre)
+            build_sidebar_list(items, selected, None, Message::SelectGenre, None)
         }
     };
 
@@ -142,6 +142,7 @@ fn build_sidebar_list(
     selected: Option<String>,
     active: Option<String>,
     make_msg: fn(String) -> Message,
+    make_ctx: Option<fn(String) -> ContextMenuTarget>,
 ) -> Element<'static, Message> {
     if items.is_empty() {
         return container(text("Nothing here").color(theme::overlay0()).size(13))
@@ -164,6 +165,7 @@ fn build_sidebar_list(
                 theme::text()
             };
 
+            let ctx = make_ctx.map(|f| f(name.clone()));
             let msg = make_msg(name.clone());
             let btn = button(text(name).color(color).size(13).width(Length::Fill))
                 .on_press(msg)
@@ -176,7 +178,14 @@ fn build_sidebar_list(
             } else {
                 container(btn).width(Length::Fill).into()
             };
-            styled
+
+            if let Some(target) = ctx {
+                mouse_area(styled)
+                    .on_right_press(Message::ToggleContextMenu(Some(target)))
+                    .into()
+            } else {
+                styled
+            }
         })
         .collect();
 
