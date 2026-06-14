@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org)
-[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](Cargo.toml)
+[![Version](https://img.shields.io/badge/version-1.0.2--dev-blue.svg)](Cargo.toml)
 [![Wayland](https://img.shields.io/badge/Wayland-native-cyan.svg)](https://wayland.freedesktop.org)
 
 A native Wayland music player written in Rust, built for [Omarchy](https://omarchy.org/) / Hyprland rices. Follows the active Omarchy theme automatically — colors update live when you switch themes.

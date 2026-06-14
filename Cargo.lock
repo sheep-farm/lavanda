@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "lavanda"
-version = "1.0.1"
+version = "1.0.2-dev"
 dependencies = [
  "anyhow",
  "chrono",
