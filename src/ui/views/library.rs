@@ -246,15 +246,13 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
             .into()
         } else {
             let selected_pl = state.selected_playlist.clone();
-            let hovered_pl = state.hovered_playlist.clone();
 
             let rows: Vec<Element<Message>> = playlists
                 .into_iter()
                 .map(|pl| {
                     let is_sel = selected_pl.as_deref() == Some(pl.as_str());
-                    let is_hov = hovered_pl.as_deref() == Some(pl.as_str());
 
-                    let delete_btn: Element<Message> = if is_hov {
+                    let delete_btn: Element<Message> = if is_sel {
                         button(
                             text(icons::ICON_TRASH)
                                 .font(icons::NERD_FONT_MONO)
@@ -270,7 +268,6 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
                     };
 
                     let msg = Message::SelectPlaylist(pl.clone());
-                    let hover_enter = Message::HoverPlaylist(Some(pl.clone()));
                     let pl_label = pl.clone();
                     let pl_btn = button(
                         row![
@@ -288,16 +285,11 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
                     .width(Length::Fill)
                     .padding([4, 8]);
 
-                    let wrapped: Element<Message> = if is_sel {
+                    if is_sel {
                         container(pl_btn).style(theme::selected_row).width(Length::Fill).into()
                     } else {
                         container(pl_btn).width(Length::Fill).into()
-                    };
-
-                    mouse_area(wrapped)
-                        .on_enter(hover_enter)
-                        .on_exit(Message::HoverPlaylist(None))
-                        .into()
+                    }
                 })
                 .collect();
 
@@ -339,8 +331,11 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
         column(rows).spacing(1).into()
     };
 
+    let scroll_h = (state.playlist_height - 30.0).max(0.0);
+
     container(
-        column![tab_row, scrollable(list).height(Length::Fill)].spacing(0),
+        column![tab_row, scrollable(list).height(Length::Fixed(scroll_h))]
+            .spacing(0),
     )
     .style(|_| iced::widget::container::Style {
         background: Some(iced::Background::Color(theme::with_alpha(theme::mantle(), 0.6))),
@@ -671,7 +666,12 @@ fn build_track_row(
         .padding([0, 12]);
 
     let row_styled: Element<'static, Message> = if is_selected {
-        container(track_row_inner).style(theme::selected_row).height(Length::Fixed(ROW_H)).width(Length::Fill).into()
+        container(track_row_inner)
+            .style(theme::selected_row)
+            .height(Length::Fixed(ROW_H))
+            .width(Length::Fill)
+            .align_y(iced::alignment::Vertical::Center)
+            .into()
     } else if is_current {
         container(track_row_inner)
             .style(|_| iced::widget::container::Style {
@@ -680,9 +680,14 @@ fn build_track_row(
             })
             .height(Length::Fixed(ROW_H))
             .width(Length::Fill)
+            .align_y(iced::alignment::Vertical::Center)
             .into()
     } else {
-        container(track_row_inner).height(Length::Fixed(ROW_H)).width(Length::Fill).into()
+        container(track_row_inner)
+            .height(Length::Fixed(ROW_H))
+            .width(Length::Fill)
+            .align_y(iced::alignment::Vertical::Center)
+            .into()
     };
 
     let select_msg = Message::SelectTrack(track.clone());

@@ -1606,6 +1606,7 @@ impl AppState {
                 let has_playlist_dialog = self.playlist_dialog.is_some();
                 let has_shortcuts = self.show_shortcuts;
                 let has_context_menu = self.show_context_menu.is_some();
+                let ctrl = self.modifiers.control() || self.modifiers.command();
 
                 match key {
                     Key::Named(Named::Escape) => {
@@ -1631,6 +1632,15 @@ impl AppState {
                     Key::Named(Named::ArrowUp) => return Task::done(Message::KeyboardArrowUp),
                     Key::Named(Named::ArrowDown) => return Task::done(Message::KeyboardArrowDown),
                     Key::Named(Named::F5) => return Task::done(Message::RescanLibrary),
+                    Key::Character(ref c) if ctrl => {
+                        if c.as_str() == "k" || c.as_str() == "K" {
+                            return if has_shortcuts {
+                                Task::done(Message::CloseShortcuts)
+                            } else {
+                                Task::done(Message::OpenShortcuts)
+                            };
+                        }
+                    }
                     Key::Character(ref c) if !has_playlist_dialog && !has_tag_editor => {
                         match c.as_str() {
                             "n" | "N" => return Task::done(Message::NextTrack),
@@ -1644,6 +1654,7 @@ impl AppState {
                             "e" | "E" | "m" | "M" => return Task::done(Message::KeyboardEdit),
                             "c" | "C" => return Task::done(Message::OpenPlaylistDialog(PlaylistDialogMode::Create)),
                             "a" | "A" => return Task::done(Message::KeyboardAdd),
+                            "t" | "T" => return Task::done(Message::ToggleLayout),
                             "v" | "V" => return Task::done(Message::ToggleSpectrum),
                             "?" => return Task::done(Message::OpenShortcuts),
                             _ => {}
@@ -1881,6 +1892,7 @@ impl AppState {
             row_item("E / M", "Edit metadata tags"),
             row_item("C", "Create playlist"),
             row_item("A", "Add song to playlist"),
+            row_item("T", "Toggle focus mode"),
             row_item("V", "Toggle spectrum visualizer"),
             row_item("←/→", "Seek backward / forward"),
             row_item("↑/↓", "Navigate track list"),

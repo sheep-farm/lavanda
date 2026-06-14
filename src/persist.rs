@@ -63,10 +63,13 @@ fn default_columns() -> Vec<TableColumn> {
     ]
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Db {
+    #[serde(default)]
     pub favorites: HashSet<PathBuf>,
+    #[serde(default)]
     pub play_counts: HashMap<PathBuf, u32>,
+    #[serde(default)]
     pub playlists: HashMap<String, Vec<PathBuf>>,
     #[serde(default)]
     pub recently_played: Vec<(PathBuf, String)>,
@@ -74,6 +77,19 @@ pub struct Db {
     pub hidden_artists_albums: Vec<(String, bool)>,
     #[serde(default = "default_columns")]
     pub table_columns: Vec<TableColumn>,
+}
+
+impl Default for Db {
+    fn default() -> Self {
+        Db {
+            favorites: HashSet::new(),
+            play_counts: HashMap::new(),
+            playlists: HashMap::new(),
+            recently_played: Vec::new(),
+            hidden_artists_albums: Vec::new(),
+            table_columns: default_columns(),
+        }
+    }
 }
 
 fn db_path() -> PathBuf {
@@ -89,10 +105,15 @@ impl Db {
         if !path.exists() {
             return Self::default();
         }
-        std::fs::read_to_string(&path)
+        let mut db: Db = std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Repara dbs antigos que persistiram a lista de colunas vazia.
+        if db.table_columns.is_empty() {
+            db.table_columns = default_columns();
+        }
+        db
     }
 
     fn save(&self) {
