@@ -50,6 +50,14 @@ A native Wayland music player written in Rust, built for [Omarchy](https://omarc
 
 ## Installation
 
+### Prebuilt binary (no Rust needed)
+
+```bash
+curl -LO https://github.com/sheep-farm/lavanda/releases/download/v1.0.1/lavanda-1.0.1-x86_64-linux.tar.gz
+tar xzf lavanda-1.0.1-x86_64-linux.tar.gz
+install -Dm755 lavanda ~/.local/bin/lavanda
+```
+
 ### From source
 
 ```bash
