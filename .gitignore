@@ -1,1 +1,8 @@
 /target
+
+# Artefatos de makepkg / AUR
+/pkg/
+/src/lavanda-*/
+/src/lavanda-*.tar.gz
+lavanda-*.pkg.tar.zst
+lavanda-*.tar.gz
