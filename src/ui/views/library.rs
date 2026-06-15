@@ -423,6 +423,10 @@ fn radio_panel_view(state: &AppState) -> Element<'_, Message> {
             .on_press(Message::RadioShowTop)
             .style(theme::secondary_button)
             .padding([5, 14]),
+        button(text("SomaFM").size(13))
+            .on_press(Message::RadioShowSomaFm)
+            .style(theme::secondary_button)
+            .padding([5, 14]),
     ]
     .spacing(8)
     .align_y(Alignment::Center)

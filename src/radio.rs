@@ -19,7 +19,7 @@ const UA: &str = concat!("lavanda/", env!("CARGO_PKG_VERSION"));
 
 /// Uma estação retornada pela API (campos relevantes; o resto é ignorado).
 /// Também é o que persistimos como favorito em `db.json`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct RadioStation {
     #[serde(default)]
     pub stationuuid: String,
@@ -130,8 +130,10 @@ pub fn is_online() -> bool {
 }
 
 /// Registra um "click" de reprodução (educado com o diretório; falha em silêncio).
+/// Estações do SomaFM (`stationuuid` começa com `somafm:`) não existem no
+/// radio-browser, então não há o que registrar.
 pub fn register_click(uuid: &str) {
-    if uuid.is_empty() {
+    if uuid.is_empty() || uuid.starts_with("somafm:") {
         return;
     }
     for base in MIRRORS {
@@ -145,4 +147,85 @@ pub fn register_click(uuid: &str) {
             return;
         }
     }
+}
+
+// ── SomaFM (diretório curado, complementar ao radio-browser) ─────────────────
+//
+// Lista enxuta e bem mantida de estações Icecast com `StreamTitle` ICY. Mapeada
+// para `RadioStation` para reaproveitar todo o pipeline (streaming, favoritos,
+// quarentena, UI). Preferimos sempre o stream MP3 de maior qualidade: os
+// formatos `aac`/`aacp` do SomaFM são HE-AAC, que o symphonia não decodifica.
+
+const SOMAFM_URL: &str = "https://somafm.com/channels.json";
+
+#[derive(Deserialize)]
+struct SomaChannels {
+    channels: Vec<SomaChannel>,
+}
+
+#[derive(Deserialize)]
+struct SomaChannel {
+    id: String,
+    title: String,
+    #[serde(default)]
+    genre: String,
+    #[serde(default)]
+    image: String,
+    #[serde(default)]
+    playlists: Vec<SomaPlaylist>,
+}
+
+#[derive(Deserialize)]
+struct SomaPlaylist {
+    url: String,
+    format: String,
+    quality: String,
+}
+
+fn quality_rank(q: &str) -> u8 {
+    match q {
+        "highest" => 3,
+        "high" => 2,
+        "low" => 1,
+        _ => 0,
+    }
+}
+
+impl SomaChannel {
+    fn into_station(self) -> Option<RadioStation> {
+        // Melhor stream MP3; ignora aac/aacp (HE-AAC não decodificável).
+        let pls = self
+            .playlists
+            .iter()
+            .filter(|p| p.format == "mp3")
+            .max_by_key(|p| quality_rank(&p.quality))?;
+        Some(RadioStation {
+            // Chave sintética: não é UUID do radio-browser (ver `register_click`).
+            stationuuid: format!("somafm:{}", self.id),
+            name: format!("SomaFM · {}", self.title),
+            url: pls.url.clone(), // .pls — resolvido por crate::audio::stream
+            homepage: format!("https://somafm.com/{}/", self.id),
+            favicon: self.image,
+            tags: self.genre.replace('|', ","),
+            codec: "MP3".into(),
+            ..Default::default()
+        })
+    }
+}
+
+/// Lista curada do SomaFM. Mesmo tipo de retorno que [`top`]/[`search`].
+pub fn somafm() -> Result<Vec<RadioStation>> {
+    let resp = ureq::get(SOMAFM_URL)
+        .set("User-Agent", UA)
+        .timeout(Duration::from_secs(12))
+        .call()
+        .map_err(|e| anyhow!("SomaFM indisponível: {e}"))?;
+    let data: SomaChannels = resp
+        .into_json()
+        .map_err(|e| anyhow!("SomaFM: resposta inválida: {e}"))?;
+    Ok(data
+        .channels
+        .into_iter()
+        .filter_map(SomaChannel::into_station)
+        .collect())
 }

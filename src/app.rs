@@ -152,6 +152,7 @@ pub enum Message {
     RadioSearchChanged(String),
     RadioSearchSubmit,
     RadioShowTop,
+    RadioShowSomaFm,
     RadioResults(Result<Vec<crate::radio::RadioStation>, String>),
     PlayStation(crate::radio::RadioStation),
     ToggleFavoriteStation(crate::radio::RadioStation),
@@ -839,6 +840,20 @@ impl AppState {
                 Task::perform(
                     async move {
                         tokio::task::spawn_blocking(|| crate::radio::top(100))
+                            .await
+                            .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::RadioResults,
+                )
+            }
+
+            Message::RadioShowSomaFm => {
+                self.radio_loading = true;
+                self.radio_error = None;
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(crate::radio::somafm)
                             .await
                             .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
                             .map_err(|e| e.to_string())
