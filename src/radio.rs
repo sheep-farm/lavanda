@@ -100,6 +100,60 @@ pub fn search(query: &str) -> Result<Vec<RadioStation>> {
     )
 }
 
+/// Estações de um país (código ISO 3166-1, ex.: `BR`), por popularidade.
+pub fn by_country(code: &str) -> Result<Vec<RadioStation>> {
+    call(
+        "/json/stations/search",
+        &[
+            ("countrycode", code),
+            ("limit", "200"),
+            ("hidebroken", "true"),
+            ("order", "clickcount"),
+            ("reverse", "true"),
+        ],
+    )
+}
+
+/// Um país do diretório, para o seletor da aba Radios.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct Country {
+    pub name: String,
+    #[serde(rename = "iso_3166_1")]
+    pub code: String,
+    #[serde(default)]
+    pub stationcount: u64,
+}
+
+impl std::fmt::Display for Country {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.name, self.stationcount)
+    }
+}
+
+/// Lista de países com estações, ordenada por quantidade (desc).
+pub fn countries() -> Result<Vec<Country>> {
+    let mut last_err = String::from("nenhum mirror tentado");
+    for base in MIRRORS {
+        let url = format!("{base}/json/countries");
+        match ureq::get(&url)
+            .set("User-Agent", UA)
+            .timeout(Duration::from_secs(12))
+            .call()
+        {
+            Ok(resp) => {
+                let mut list = resp
+                    .into_json::<Vec<Country>>()
+                    .map_err(|e| anyhow!("resposta inválida: {e}"))?;
+                list.retain(|c| !c.code.is_empty() && c.stationcount > 0);
+                list.sort_by(|a, b| b.stationcount.cmp(&a.stationcount));
+                return Ok(list);
+            }
+            Err(e) => last_err = e.to_string(),
+        }
+    }
+    Err(anyhow!("radio-browser indisponível: {last_err}"))
+}
+
 /// Estações mais clicadas no momento (tela inicial da aba Radios).
 pub fn top(limit: usize) -> Result<Vec<RadioStation>> {
     let limit = limit.to_string();

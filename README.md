@@ -135,7 +135,7 @@ lavanda scans `~/Music` recursively on launch and builds an in-memory index. The
 
 ## Internet radio
 
-The **Radios** tab streams stations from the community [radio-browser.info](https://www.radio-browser.info/) directory. Hit **Top** for the most popular stations or type a name to search. There's also a **SomaFM** button for the curated [SomaFM](https://somafm.com/) channels (ambient, downtempo, electronica and more) — these resolve to high-quality MP3 streams that always decode cleanly. Click a station to play it; the player shows the live track title from the stream's ICY metadata. Use the ★ button to keep favorites (listed in the sidebar).
+The **Radios** tab streams stations from the community [radio-browser.info](https://www.radio-browser.info/) directory. Hit **Top** for the most popular stations, type a name to search, or pick a **Country** from the dropdown to browse a nation's stations by popularity. There's also a **SomaFM** button for the curated [SomaFM](https://somafm.com/) channels (ambient, downtempo, electronica and more) — these resolve to high-quality MP3 streams that always decode cleanly. Click a station to play it; the player shows the live track title from the stream's ICY metadata. Use the ★ button to keep favorites (listed in the sidebar).
 
 Stations that fail to play (dead servers, unsupported formats) open a dialog where you can **quarantine** them — quarantined stations never appear in results again. Favorites and quarantine are stored in `~/.config/lavanda/db.json`.
 

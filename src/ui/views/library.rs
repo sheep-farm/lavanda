@@ -1,5 +1,5 @@
 use iced::widget::{
-    button, column, container, mouse_area, row, scrollable, text, text_input, Space,
+    button, column, container, mouse_area, pick_list, row, scrollable, text, text_input, Space,
 };
 use iced::{Alignment, Element, Length};
 
@@ -427,6 +427,14 @@ fn radio_panel_view(state: &AppState) -> Element<'_, Message> {
             .on_press(Message::RadioShowSomaFm)
             .style(theme::secondary_button)
             .padding([5, 14]),
+        pick_list(
+            state.radio_countries.as_slice(),
+            state.radio_country.clone(),
+            Message::RadioCountrySelected,
+        )
+        .placeholder("Country")
+        .text_size(13)
+        .padding([5, 10]),
     ]
     .spacing(8)
     .align_y(Alignment::Center)

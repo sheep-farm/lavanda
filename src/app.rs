@@ -153,6 +153,8 @@ pub enum Message {
     RadioSearchSubmit,
     RadioShowTop,
     RadioShowSomaFm,
+    RadioCountriesLoaded(Result<Vec<crate::radio::Country>, String>),
+    RadioCountrySelected(crate::radio::Country),
     RadioResults(Result<Vec<crate::radio::RadioStation>, String>),
     PlayStation(crate::radio::RadioStation),
     ToggleFavoriteStation(crate::radio::RadioStation),
@@ -291,6 +293,9 @@ pub struct AppState {
     pub radio_error_dialog: Option<(crate::radio::RadioStation, String)>,
     pub current_station: Option<crate::radio::RadioStation>,
     pub stream_title: Option<String>,
+    /// Países disponíveis (seletor da aba Radios); carregado sob demanda.
+    pub radio_countries: Vec<crate::radio::Country>,
+    pub radio_country: Option<crate::radio::Country>,
     /// Conectividade — a aba Radios fica desabilitada quando offline.
     pub online: bool,
 
@@ -428,6 +433,8 @@ impl AppState {
             radio_error_dialog: None,
             current_station: None,
             stream_title: None,
+            radio_countries: Vec::new(),
+            radio_country: None,
             online: true,
             view_mode: ViewMode::Artists,
             selected_artist: None,
@@ -802,10 +809,31 @@ impl AppState {
                     ViewMode::Albums => { self.selected_album = self.albums().first().cloned(); }
                     ViewMode::Genres => { self.selected_genre = self.genres().first().cloned(); }
                     ViewMode::Radios => {
+                        // Carrega a lista de países uma vez (para o seletor).
+                        let load_countries = if self.radio_countries.is_empty() {
+                            Some(Task::perform(
+                                async {
+                                    tokio::task::spawn_blocking(crate::radio::countries)
+                                        .await
+                                        .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                                        .map_err(|e| e.to_string())
+                                },
+                                Message::RadioCountriesLoaded,
+                            ))
+                        } else {
+                            None
+                        };
                         // Mostra os favoritos; se não há resultados ainda, busca o top.
-                        if self.radio_results.is_empty() && !self.radio_loading {
-                            return Task::done(Message::RadioShowTop);
-                        }
+                        let load_top = if self.radio_results.is_empty() && !self.radio_loading {
+                            Some(Task::done(Message::RadioShowTop))
+                        } else {
+                            None
+                        };
+                        return match (load_countries, load_top) {
+                            (Some(a), Some(b)) => Task::batch([a, b]),
+                            (Some(a), None) | (None, Some(a)) => a,
+                            (None, None) => Task::none(),
+                        };
                     }
                 }
                 self.update_filtered_tracks();
@@ -823,6 +851,7 @@ impl AppState {
                 }
                 self.radio_loading = true;
                 self.radio_error = None;
+                self.radio_country = None;
                 Task::perform(
                     async move {
                         tokio::task::spawn_blocking(move || crate::radio::search(&query))
@@ -837,6 +866,7 @@ impl AppState {
             Message::RadioShowTop => {
                 self.radio_loading = true;
                 self.radio_error = None;
+                self.radio_country = None;
                 Task::perform(
                     async move {
                         tokio::task::spawn_blocking(|| crate::radio::top(100))
@@ -851,9 +881,33 @@ impl AppState {
             Message::RadioShowSomaFm => {
                 self.radio_loading = true;
                 self.radio_error = None;
+                self.radio_country = None;
                 Task::perform(
                     async move {
                         tokio::task::spawn_blocking(crate::radio::somafm)
+                            .await
+                            .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                            .map_err(|e| e.to_string())
+                    },
+                    Message::RadioResults,
+                )
+            }
+
+            Message::RadioCountriesLoaded(result) => {
+                if let Ok(list) = result {
+                    self.radio_countries = list;
+                }
+                Task::none()
+            }
+
+            Message::RadioCountrySelected(country) => {
+                self.radio_country = Some(country.clone());
+                self.radio_loading = true;
+                self.radio_error = None;
+                let code = country.code;
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || crate::radio::by_country(&code))
                             .await
                             .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
                             .map_err(|e| e.to_string())
