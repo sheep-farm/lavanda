@@ -18,7 +18,7 @@ A native Wayland music player written in Rust, built for [Omarchy](https://omarc
 - **Sortable, configurable columns** — title, artist, album, genre, year, disc, duration, play count, date played; click a header to sort, right-click to show/hide columns
 - **Playlists** — create, rename (double-click), delete custom playlists; add tracks or whole albums via right-click
 - **Auto-playlists** — Liked Songs, Recently Played and Most Played, maintained automatically
-- **Internet radio** — a **Radios** tab backed by the [radio-browser.info](https://www.radio-browser.info/) directory: search/browse stations, play Icecast/Shoutcast streams with live "now playing" (ICY) metadata, star favorites, and quarantine dead stations to hide them. The tab disables itself automatically when offline
+- **Internet radio** — a **Radios** tab backed by the [radio-browser.info](https://www.radio-browser.info/) directory plus a curated [SomaFM](https://somafm.com/) shortcut: search/browse stations, play Icecast/Shoutcast streams with live "now playing" (ICY) metadata, star favorites, and quarantine dead stations to hide them. The tab disables itself automatically when offline
 - **Liked songs & play counts** — toggle a favorite with `l`/`f`; plays are counted and persisted to `~/.config/lavanda/db.json`
 - **Multi-selection** — `Ctrl+Click` to toggle, `Shift+Click` to range-select; context-menu actions apply to the whole selection
 - **Album art** — embedded cover tag displayed; falls back to `cover.jpg`, `Cover.jpg`, `folder.jpg` (and `.png`, `.webp` variants) in the same directory
@@ -135,7 +135,7 @@ lavanda scans `~/Music` recursively on launch and builds an in-memory index. The
 
 ## Internet radio
 
-The **Radios** tab streams stations from the community [radio-browser.info](https://www.radio-browser.info/) directory. Hit **Top** for the most popular stations or type a name to search. Click a station to play it; the player shows the live track title from the stream's ICY metadata. Use the ★ button to keep favorites (listed in the sidebar).
+The **Radios** tab streams stations from the community [radio-browser.info](https://www.radio-browser.info/) directory. Hit **Top** for the most popular stations or type a name to search. There's also a **SomaFM** button for the curated [SomaFM](https://somafm.com/) channels (ambient, downtempo, electronica and more) — these resolve to high-quality MP3 streams that always decode cleanly. Click a station to play it; the player shows the live track title from the stream's ICY metadata. Use the ★ button to keep favorites (listed in the sidebar).
 
 Stations that fail to play (dead servers, unsupported formats) open a dialog where you can **quarantine** them — quarantined stations never appear in results again. Favorites and quarantine are stored in `~/.config/lavanda/db.json`.
 
