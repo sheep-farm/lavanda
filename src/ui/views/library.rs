@@ -440,6 +440,33 @@ fn radio_panel_view(state: &AppState) -> Element<'_, Message> {
     .align_y(Alignment::Center)
     .padding([6, 12]);
 
+    // Entrada manual: cola uma URL (.pls/.m3u ou stream direto) e toca.
+    let url_entry = row![
+        text(icons::ICON_BROADCAST)
+            .font(icons::NERD_FONT_MONO)
+            .size(24)
+            .color(theme::overlay0()),
+        text_input("Paste a stream URL (.pls, .m3u or direct)…", &state.radio_url_input)
+            .on_input(Message::RadioUrlChanged)
+            .on_submit(Message::RadioPlayUrl)
+            .style(theme::dialog_input)
+            .size(13)
+            .padding([4, 8])
+            .width(Length::Fill),
+        button(text("Play URL").size(13))
+            .on_press(Message::RadioPlayUrl)
+            .style(theme::secondary_button)
+            .padding([5, 14]),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .padding(iced::Padding {
+        top: 0.0,
+        right: 12.0,
+        bottom: 6.0,
+        left: 12.0,
+    });
+
     // Resultados têm prioridade: um erro de API/reprodução nunca apaga a lista.
     let body: Element<Message> = if state.radio_loading {
         container(text("Loading…").size(15).color(theme::overlay0()))
@@ -475,7 +502,7 @@ fn radio_panel_view(state: &AppState) -> Element<'_, Message> {
             .into()
     };
 
-    column![search, body]
+    column![search, url_entry, body]
         .spacing(0)
         .width(Length::Fill)
         .height(Length::Fill)

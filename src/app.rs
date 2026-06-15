@@ -155,6 +155,8 @@ pub enum Message {
     RadioShowSomaFm,
     RadioCountriesLoaded(Result<Vec<crate::radio::Country>, String>),
     RadioCountrySelected(crate::radio::Country),
+    RadioUrlChanged(String),
+    RadioPlayUrl,
     RadioResults(Result<Vec<crate::radio::RadioStation>, String>),
     PlayStation(crate::radio::RadioStation),
     ToggleFavoriteStation(crate::radio::RadioStation),
@@ -287,6 +289,8 @@ pub struct AppState {
     // Rádio
     pub radio_results: Vec<crate::radio::RadioStation>,
     pub radio_search: String,
+    /// Campo de entrada manual de estação por URL (.pls/.m3u ou stream direto).
+    pub radio_url_input: String,
     pub radio_loading: bool,
     pub radio_error: Option<String>,
     /// Diálogo de erro de reprodução: (estação, mensagem). Permite quarentena.
@@ -428,6 +432,7 @@ impl AppState {
             tracks: Vec::new(),
             radio_results: Vec::new(),
             radio_search: String::new(),
+            radio_url_input: String::new(),
             radio_loading: false,
             radio_error: None,
             radio_error_dialog: None,
@@ -843,6 +848,18 @@ impl AppState {
             // ── Rádio ───────────────────────────────────────────────────────────
 
             Message::RadioSearchChanged(q) => { self.radio_search = q; Task::none() }
+
+            Message::RadioUrlChanged(u) => { self.radio_url_input = u; Task::none() }
+
+            Message::RadioPlayUrl => {
+                let url = self.radio_url_input.trim().to_string();
+                if url.is_empty() {
+                    return Task::none();
+                }
+                self.radio_url_input.clear();
+                let station = crate::radio::RadioStation::from_url(&url);
+                self.play_station_internal(station)
+            }
 
             Message::RadioSearchSubmit => {
                 let query = self.radio_search.trim().to_string();

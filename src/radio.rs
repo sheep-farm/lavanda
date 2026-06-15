@@ -59,6 +59,31 @@ impl RadioStation {
             &self.url
         }
     }
+
+    /// Cria uma estação a partir de uma URL colada pelo usuário (.pls/.m3u ou
+    /// stream direto). O nome é derivado do host; o codec é inferido depois pelo
+    /// Content-Type. A chave sintética `url:` evita `register_click`.
+    pub fn from_url(url: &str) -> Self {
+        let url = url.trim().to_string();
+        let host = url
+            .split("://")
+            .nth(1)
+            .unwrap_or(&url)
+            .split('/')
+            .next()
+            .unwrap_or(&url);
+        let name = if host.is_empty() {
+            "Custom stream".to_string()
+        } else {
+            host.to_string()
+        };
+        RadioStation {
+            stationuuid: format!("url:{url}"),
+            name,
+            url,
+            ..Default::default()
+        }
+    }
 }
 
 fn call(path: &str, queries: &[(&str, &str)]) -> Result<Vec<RadioStation>> {
@@ -184,10 +209,10 @@ pub fn is_online() -> bool {
 }
 
 /// Registra um "click" de reprodução (educado com o diretório; falha em silêncio).
-/// Estações do SomaFM (`stationuuid` começa com `somafm:`) não existem no
-/// radio-browser, então não há o que registrar.
+/// Estações não vindas do radio-browser (SomaFM `somafm:`, URL manual `url:`)
+/// não existem no diretório, então não há o que registrar.
 pub fn register_click(uuid: &str) {
-    if uuid.is_empty() || uuid.starts_with("somafm:") {
+    if uuid.is_empty() || uuid.starts_with("somafm:") || uuid.starts_with("url:") {
         return;
     }
     for base in MIRRORS {
