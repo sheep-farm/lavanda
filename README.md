@@ -7,7 +7,13 @@
 
 A native Wayland music player written in Rust, built for [Omarchy](https://omarchy.org/) / Hyprland rices. Follows the active Omarchy theme automatically — colors update live when you switch themes.
 
-![lavanda](https://raw.githubusercontent.com/sheep-farm/lavanda/master/assets/screenshot.png)
+![lavanda — library view](assets/screenshot.png)
+
+*Library view — browse by artist/album/genre, sortable columns, playlists and auto-playlists.*
+
+![lavanda — focus layout](assets/focus.png)
+
+*Focus layout — large centered cover art with the live FFT spectrum (toggle with `t`).*
 
 ---
 
