@@ -287,7 +287,7 @@ Track metadata lives in memory for the session; library state (likes, play count
 
 ## Status
 
-**1.0.1** — functional for daily use.
+**1.0.2** — functional for daily use.
 
 Known limitations:
 - Seek accuracy depends on the container format (Symphonia limitation)
