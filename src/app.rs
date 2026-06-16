@@ -196,6 +196,7 @@ pub enum Message {
 
     // Like
     ToggleLikeTrack(Track),
+    ToggleFavoriteAlbum(String),
 
     // Playlists
     OpenPlaylistDialog(PlaylistDialogMode),
@@ -576,6 +577,9 @@ impl AppState {
         } else if let Some(ref playlist_name) = self.selected_playlist.clone() {
             if playlist_name == "Liked Songs" {
                 self.tracks = self.all_tracks.iter().filter(|t| t.liked).cloned().collect();
+            } else if playlist_name == "Liked Albums" {
+                let favs = crate::persist::get(|db| db.favorite_albums.clone());
+                self.tracks = self.all_tracks.iter().filter(|t| favs.contains(&t.album)).cloned().collect();
             } else if playlist_name == "Most Played" {
                 let mut temp = self.all_tracks.clone();
                 temp.sort_by(|a, b| b.play_count.cmp(&a.play_count));
@@ -636,7 +640,28 @@ impl AppState {
         }
 
         if let Some(col) = self.sort_column {
+            // Com agrupamento por álbum, a ordenação ocorre *dentro* de cada
+            // grupo: os álbuns mantêm sua ordem de aparição (chave primária) e o
+            // critério escolhido ordena apenas as faixas de um mesmo álbum.
+            let album_order: std::collections::HashMap<String, usize> = if self.group_by_album {
+                let mut m = std::collections::HashMap::new();
+                for t in &self.tracks {
+                    let n = m.len();
+                    m.entry(t.album.clone()).or_insert(n);
+                }
+                m
+            } else {
+                std::collections::HashMap::new()
+            };
+
             self.tracks.sort_by(|a, b| {
+                if self.group_by_album {
+                    let pa = album_order.get(&a.album).copied().unwrap_or(usize::MAX);
+                    let pb = album_order.get(&b.album).copied().unwrap_or(usize::MAX);
+                    if pa != pb {
+                        return pa.cmp(&pb); // mantém os grupos juntos e na ordem original
+                    }
+                }
                 let cmp = match col {
                     SortColumn::TrackNumber => a.track_number.unwrap_or(u32::MAX).cmp(&b.track_number.unwrap_or(u32::MAX)),
                     SortColumn::Title => a.title.to_lowercase().cmp(&b.title.to_lowercase()),
@@ -766,6 +791,7 @@ impl AppState {
             Message::ToggleShuffle => {
                 self.shuffle = !self.shuffle;
                 self.send_mpris(MprisUpdate::Shuffle(self.shuffle));
+                self.update_next(); // o prefetch precisa refletir o novo modo
                 Task::none()
             }
 
@@ -773,6 +799,7 @@ impl AppState {
                 self.repeat = !self.repeat;
                 let loop_status = if self.repeat { LoopStatus::Track } else { LoopStatus::None };
                 self.send_mpris(MprisUpdate::Loop(loop_status));
+                self.update_next();
                 Task::none()
             }
 
@@ -1256,6 +1283,15 @@ impl AppState {
                 if let Some(ref mut ct) = self.current_track { if ct.path == track.path { ct.liked = liked; } }
                 if let Some(ref mut st) = self.selected_track { if st.path == track.path { st.liked = liked; } }
                 self.update_filtered_tracks();
+                Task::none()
+            }
+
+            Message::ToggleFavoriteAlbum(album) => {
+                self.show_context_menu = None;
+                crate::persist::toggle_favorite_album(album);
+                if self.selected_playlist.as_deref() == Some("Liked Albums") {
+                    self.update_filtered_tracks();
+                }
                 Task::none()
             }
 
@@ -1778,30 +1814,26 @@ impl AppState {
                     }
                     Task::none()
                 }
-                AudioEvent::TrackEnded => {
-                    if self.repeat {
-                        if let Some(t) = self.current_track.clone() {
-                            self.audio.send(AudioCommand::Play(t.path));
-                            self.notify_mpris_track(PlaybackStatus::Playing);
-                        }
-                        Task::none()
+                AudioEvent::TrackAdvanced(path) => {
+                    // O áudio já encadeou (gapless); só atualiza o estado da UI.
+                    if let Some(track) = self
+                        .all_tracks
+                        .iter()
+                        .find(|t| t.path == path)
+                        .or_else(|| self.queue.iter().find(|t| t.path == path))
+                        .cloned()
+                    {
+                        self.set_now_playing(track)
                     } else {
-                        let current_idx = self.current_track.as_ref()
-                            .and_then(|ct| self.queue.iter().position(|t| t.id == ct.id));
-                        let is_last = match current_idx {
-                            Some(i) => i + 1 >= self.queue.len(),
-                            None => true,
-                        };
-                        if is_last && !self.shuffle {
-                            self.audio.send(AudioCommand::Stop);
-                            self.playback_state = PlaybackState::Stopped;
-                            self.position = Duration::ZERO;
-                            self.send_mpris(MprisUpdate::Status(PlaybackStatus::Stopped));
-                            Task::none()
-                        } else {
-                            self.advance_track(1)
-                        }
+                        Task::none()
                     }
+                }
+                AudioEvent::TrackEnded => {
+                    // Fim da fila (o avanço normal é tratado por TrackAdvanced).
+                    self.playback_state = PlaybackState::Stopped;
+                    self.position = Duration::ZERO;
+                    self.send_mpris(MprisUpdate::Status(PlaybackStatus::Stopped));
+                    Task::none()
                 }
                 AudioEvent::Error(e) => {
                     if let Some(station) = self.current_station.clone() {
@@ -2136,9 +2168,19 @@ impl AppState {
                 (format!("Artist: {name}"), Some(hide_btn), create)
             }
             ContextMenuTarget::Album(name) => {
-                let hide_btn: Element<Message> = button(text("Hide from UI").size(13))
-                    .on_press(Message::HideAlbumOrArtist(name.clone(), false))
-                    .style(item_style).padding([4, 8]).width(Length::Fill).into();
+                let fav_label = if crate::persist::is_favorite_album(name) {
+                    "Unfavorite album"
+                } else {
+                    "Favorite album"
+                };
+                let album_btns: Element<Message> = column![
+                    button(text(fav_label).size(13))
+                        .on_press(Message::ToggleFavoriteAlbum(name.clone()))
+                        .style(item_style).padding([4, 8]).width(Length::Fill),
+                    button(text("Hide from UI").size(13))
+                        .on_press(Message::HideAlbumOrArtist(name.clone(), false))
+                        .style(item_style).padding([4, 8]).width(Length::Fill),
+                ].spacing(4).into();
                 for pl in &custom_playlists {
                     let album_tracks: Vec<_> = self.all_tracks.iter()
                         .filter(|t| t.album == *name).cloned().collect();
@@ -2151,7 +2193,7 @@ impl AppState {
                 let create: Element<Message> = button(text("+ Create playlist").size(12))
                     .on_press(Message::CreatePlaylistFromContext(name.clone(), false))
                     .style(accent_item_style).padding([4, 8]).width(Length::Fill).into();
-                (format!("Album: {name}"), Some(hide_btn), create)
+                (format!("Album: {name}"), Some(album_btns), create)
             }
             ContextMenuTarget::Track(track) => {
                 let like_label = if track.liked { "Unlike this song" } else { "Like this song" };
@@ -2319,10 +2361,18 @@ impl AppState {
     // ── Helpers de reprodução ─────────────────────────────────────────────────
 
     fn play_track_internal(&mut self, track: Track) -> Task<Message> {
-        let cover_data = load_cover(&track.path);
-        let track = Track { cover_data: cover_data.clone(), ..track };
+        // Salto explícito: corta o áudio atual e começa do zero.
         self.audio.send(AudioCommand::Play(track.path.clone()));
         self.audio.send(AudioCommand::SetVolume(self.volume));
+        self.set_now_playing(track)
+    }
+
+    /// Atualiza o estado "tocando agora" (capa, MPRIS, play count, prefetch da
+    /// próxima) **sem** reenviar áudio — usado tanto pelo salto explícito quanto
+    /// pelo avanço gapless (`AudioEvent::TrackAdvanced`).
+    fn set_now_playing(&mut self, track: Track) -> Task<Message> {
+        let cover_data = load_cover(&track.path);
+        let track = Track { cover_data: cover_data.clone(), ..track };
         self.current_station = None;
         self.stream_title = None;
         self.current_track = Some(track.clone());
@@ -2362,6 +2412,9 @@ impl AppState {
 
         send_track_notification(&track.title, &track.artist);
 
+        // Pré-carrega a próxima faixa para a transição sem cortes (gapless).
+        self.update_next();
+
         if let Some(y) = self.calculate_scroll_offset(track.id) {
             iced::widget::scrollable::scroll_to(
                 iced::widget::scrollable::Id::new("tracklist_scroll"),
@@ -2370,6 +2423,48 @@ impl AppState {
         } else {
             Task::none()
         }
+    }
+
+    /// Decide a próxima faixa conforme fila/shuffle/repeat, sem avançar.
+    /// `None` = nada a tocar depois (fim da fila, sem repeat).
+    fn peek_next(&self) -> Option<Track> {
+        if self.queue.is_empty() {
+            return None;
+        }
+        if self.repeat {
+            return self.current_track.clone();
+        }
+        let cur = self
+            .current_track
+            .as_ref()
+            .and_then(|ct| self.queue.iter().position(|t| t.id == ct.id));
+        if self.shuffle {
+            use rand::Rng;
+            let len = self.queue.len();
+            if len == 1 {
+                return self.queue.first().cloned();
+            }
+            let mut rng = rand::thread_rng();
+            let mut idx = rng.gen_range(0..len);
+            if let Some(c) = cur {
+                while idx == c {
+                    idx = rng.gen_range(0..len);
+                }
+            }
+            self.queue.get(idx).cloned()
+        } else {
+            match cur {
+                Some(i) if i + 1 < self.queue.len() => self.queue.get(i + 1).cloned(),
+                Some(_) => None, // última faixa: para ao fim
+                None => self.queue.first().cloned(),
+            }
+        }
+    }
+
+    /// Informa o audio thread qual será a próxima faixa (prefetch gapless).
+    fn update_next(&self) {
+        let next = self.peek_next().map(|t| t.path);
+        self.audio.send(AudioCommand::SetNext(next));
     }
 
     fn play_station_internal(&mut self, station: crate::radio::RadioStation) -> Task<Message> {

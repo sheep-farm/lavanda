@@ -68,6 +68,8 @@ pub struct Db {
     #[serde(default)]
     pub favorites: HashSet<PathBuf>,
     #[serde(default)]
+    pub favorite_albums: HashSet<String>,
+    #[serde(default)]
     pub play_counts: HashMap<PathBuf, u32>,
     #[serde(default)]
     pub playlists: HashMap<String, Vec<PathBuf>>,
@@ -87,6 +89,7 @@ impl Default for Db {
     fn default() -> Self {
         Db {
             favorites: HashSet::new(),
+            favorite_albums: HashSet::new(),
             play_counts: HashMap::new(),
             playlists: HashMap::new(),
             recently_played: Vec::new(),
@@ -168,6 +171,22 @@ pub fn toggle_favorite(path: PathBuf) -> bool {
             true
         }
     })
+}
+
+pub fn toggle_favorite_album(name: String) -> bool {
+    write(|db| {
+        if db.favorite_albums.contains(&name) {
+            db.favorite_albums.remove(&name);
+            false
+        } else {
+            db.favorite_albums.insert(name);
+            true
+        }
+    })
+}
+
+pub fn is_favorite_album(name: &str) -> bool {
+    get(|db| db.favorite_albums.contains(name))
 }
 
 pub fn increment_play_count(path: PathBuf) -> u32 {

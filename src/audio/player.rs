@@ -40,6 +40,9 @@ pub enum AudioCommand {
     Stop,
     Seek(Duration),
     SetVolume(f32),
+    /// Próxima faixa a tocar quando a atual terminar naturalmente (gapless).
+    /// `None` = parar ao fim. A UI mantém isto atualizado conforme a fila/modo.
+    SetNext(Option<PathBuf>),
 }
 
 #[derive(Debug, Clone)]
@@ -54,7 +57,11 @@ pub enum AudioEvent {
     /// Título "now playing" de um stream de rádio (metadata ICY).
     StreamTitle(String),
     Error(String),
+    /// Fim da fila (sem próxima): a reprodução parou.
     TrackEnded,
+    /// Encadeou para a próxima faixa sem cortar o áudio (gapless). A UI atualiza
+    /// a faixa atual sem reenviar `Play`.
+    TrackAdvanced(PathBuf),
 }
 
 pub struct AudioPlayer {
@@ -168,7 +175,11 @@ fn audio_thread(
     }
 
     let mut cancel: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    let mut current_path: Option<PathBuf> = None;
+    // Compartilhado: a cadeia gapless (em outra task) atualiza a faixa atual,
+    // e Seek/Resume precisam ler a que está realmente tocando.
+    let current_path: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
+    // Próxima faixa pré-carregada para o encadeamento sem cortes.
+    let next_path: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));
     let mut current_stream: Option<String> = None;
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -185,9 +196,14 @@ fn audio_thread(
                     cancel.store(true, Ordering::SeqCst);
                     paused.store(false, Ordering::SeqCst);
                     pcm.lock().unwrap().clear();
-                    current_path = None;
+                    *current_path.lock().unwrap() = None;
+                    *next_path.lock().unwrap() = None;
                     current_stream = None;
                     let _ = event_tx.send(AudioEvent::Stopped);
+                }
+
+                Some(AudioCommand::SetNext(p)) => {
+                    *next_path.lock().unwrap() = p;
                 }
 
                 Some(AudioCommand::Pause) => {
@@ -197,7 +213,7 @@ fn audio_thread(
 
                 Some(AudioCommand::Resume) => {
                     paused.store(false, Ordering::SeqCst);
-                    if current_path.is_some() || current_stream.is_some() {
+                    if current_path.lock().unwrap().is_some() || current_stream.is_some() {
                         let _ = event_tx.send(AudioEvent::Playing);
                     }
                 }
@@ -207,7 +223,8 @@ fn audio_thread(
                 }
 
                 Some(AudioCommand::Seek(pos)) => {
-                    if let Some(path) = current_path.clone() {
+                    let path = current_path.lock().unwrap().clone();
+                    if let Some(path) = path {
                         cancel.store(true, Ordering::SeqCst);
                         paused.store(false, Ordering::SeqCst);
                         pcm.lock().unwrap().clear();
@@ -215,6 +232,9 @@ fn audio_thread(
                         let new_cancel = Arc::new(AtomicBool::new(false));
                         cancel = new_cancel.clone();
 
+                        // Mantém next_path: ao terminar, o encadeamento segue normal.
+                        let np = next_path.clone();
+                        let cp = current_path.clone();
                         let pcm2 = pcm.clone();
                         let tx = event_tx.clone();
                         let vol = shared_vol.clone();
@@ -222,15 +242,7 @@ fn audio_thread(
                         let viz = viz_buf.clone();
 
                         tokio::task::spawn_blocking(move || {
-                            match decode_file(&path, pcm2, tx.clone(), vol, flag, viz, Some(pos)) {
-                                Ok(true) => {
-                                    let _ = tx.send(AudioEvent::TrackEnded);
-                                }
-                                Ok(false) => {}
-                                Err(e) => {
-                                    let _ = tx.send(AudioEvent::Error(e.to_string()));
-                                }
-                            }
+                            play_chain(path, Some(pos), cp, np, pcm2, tx, vol, flag, viz);
                         });
                     }
                 }
@@ -239,14 +251,19 @@ fn audio_thread(
                     cancel.store(true, Ordering::SeqCst);
                     paused.store(false, Ordering::SeqCst);
                     pcm.lock().unwrap().clear();
+                    // Salto explícito do usuário: descarta a próxima pré-carregada
+                    // (a UI reenvia SetNext em seguida).
+                    *next_path.lock().unwrap() = None;
 
                     let new_cancel = Arc::new(AtomicBool::new(false));
                     cancel = new_cancel.clone();
-                    current_path = Some(path.clone());
+                    *current_path.lock().unwrap() = Some(path.clone());
                     current_stream = None;
 
                     let _ = event_tx.send(AudioEvent::Playing);
 
+                    let np = next_path.clone();
+                    let cp = current_path.clone();
                     let pcm2 = pcm.clone();
                     let tx = event_tx.clone();
                     let vol = shared_vol.clone();
@@ -254,15 +271,7 @@ fn audio_thread(
                     let viz = viz_buf.clone();
 
                     tokio::task::spawn_blocking(move || {
-                        match decode_file(&path, pcm2, tx.clone(), vol, flag, viz, None) {
-                            Ok(true) => {
-                                let _ = tx.send(AudioEvent::TrackEnded);
-                            }
-                            Ok(false) => {}
-                            Err(e) => {
-                                let _ = tx.send(AudioEvent::Error(e.to_string()));
-                            }
-                        }
+                        play_chain(path, None, cp, np, pcm2, tx, vol, flag, viz);
                     });
                 }
 
@@ -270,10 +279,11 @@ fn audio_thread(
                     cancel.store(true, Ordering::SeqCst);
                     paused.store(false, Ordering::SeqCst);
                     pcm.lock().unwrap().clear();
+                    *next_path.lock().unwrap() = None;
 
                     let new_cancel = Arc::new(AtomicBool::new(false));
                     cancel = new_cancel.clone();
-                    current_path = None;
+                    *current_path.lock().unwrap() = None;
                     current_stream = Some(url.clone());
 
                     let _ = event_tx.send(AudioEvent::Playing);
@@ -298,6 +308,60 @@ fn audio_thread(
             }
         }
     });
+}
+
+/// Toca `initial` e, ao terminar naturalmente, encadeia a próxima faixa
+/// (`next_path`) **no mesmo buffer, sem `clear()`** — eis o gapless. Roda numa
+/// task bloqueante dedicada; `cancel` interrompe (novo Play/Seek/Stop).
+#[allow(clippy::too_many_arguments)]
+fn play_chain(
+    initial: PathBuf,
+    seek_to: Option<Duration>,
+    current_path: Arc<Mutex<Option<PathBuf>>>,
+    next_path: Arc<Mutex<Option<PathBuf>>>,
+    pcm: Arc<Mutex<VecDeque<f32>>>,
+    event_tx: mpsc::UnboundedSender<AudioEvent>,
+    volume: Arc<Mutex<f32>>,
+    cancel: Arc<AtomicBool>,
+    viz_buf: Arc<Mutex<VecDeque<f32>>>,
+) {
+    let mut path = initial;
+    let mut seek = seek_to;
+    loop {
+        match decode_file(
+            &path,
+            pcm.clone(),
+            event_tx.clone(),
+            volume.clone(),
+            cancel.clone(),
+            viz_buf.clone(),
+            seek,
+        ) {
+            // Fim natural: tenta a próxima pré-carregada sem cortar o áudio.
+            Ok(true) => {
+                let nxt = next_path.lock().unwrap().take();
+                match nxt {
+                    Some(p) => {
+                        *current_path.lock().unwrap() = Some(p.clone());
+                        let _ = event_tx.send(AudioEvent::TrackAdvanced(p.clone()));
+                        path = p;
+                        seek = None;
+                        continue;
+                    }
+                    None => {
+                        let _ = event_tx.send(AudioEvent::TrackEnded);
+                        break;
+                    }
+                }
+            }
+            // Cancelado por novo comando: encerra em silêncio.
+            Ok(false) => break,
+            Err(e) => {
+                let _ = event_tx.send(AudioEvent::Error(e.to_string()));
+                break;
+            }
+        }
+    }
 }
 
 fn fill_output(output: &mut [f32], pcm: &Arc<Mutex<VecDeque<f32>>>, paused: &Arc<AtomicBool>) {

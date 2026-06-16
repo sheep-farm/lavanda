@@ -95,18 +95,18 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
             let items = state.artists();
             let selected = state.selected_artist.clone();
             let active = state.current_track.as_ref().map(|t| t.artist.clone());
-            build_sidebar_list(items, selected, active, Message::SelectArtist, Some(ContextMenuTarget::Artist))
+            build_sidebar_list(items, selected, active, Message::SelectArtist, Some(ContextMenuTarget::Artist), false)
         }
         ViewMode::Albums => {
             let items = state.albums();
             let selected = state.selected_album.clone();
             let active = state.current_track.as_ref().map(|t| t.album.clone());
-            build_sidebar_list(items, selected, active, Message::SelectAlbum, Some(ContextMenuTarget::Album))
+            build_sidebar_list(items, selected, active, Message::SelectAlbum, Some(ContextMenuTarget::Album), true)
         }
         ViewMode::Genres => {
             let items = state.genres();
             let selected = state.selected_genre.clone();
-            build_sidebar_list(items, selected, None, Message::SelectGenre, None)
+            build_sidebar_list(items, selected, None, Message::SelectGenre, None, false)
         }
         ViewMode::Radios => radio_favorites_list(state),
     };
@@ -158,6 +158,7 @@ fn build_sidebar_list(
     active: Option<String>,
     make_msg: fn(String) -> Message,
     make_ctx: Option<fn(String) -> ContextMenuTarget>,
+    mark_fav: bool,
 ) -> Element<'static, Message> {
     if items.is_empty() {
         return container(text("Nothing here").color(theme::overlay0()).size(13))
@@ -166,6 +167,13 @@ fn build_sidebar_list(
             .width(Length::Fill)
             .into();
     }
+
+    // Carrega os álbuns favoritos uma vez (evita travar o DB por item).
+    let favs = if mark_fav {
+        crate::persist::get(|db| db.favorite_albums.clone())
+    } else {
+        std::collections::HashSet::new()
+    };
 
     let rows: Vec<Element<'static, Message>> = items
         .into_iter()
@@ -182,7 +190,22 @@ fn build_sidebar_list(
 
             let ctx = make_ctx.map(|f| f(name.clone()));
             let msg = make_msg(name.clone());
-            let btn = button(text(name).color(color).size(13).width(Length::Fill))
+            let label: Element<'static, Message> = if favs.contains(&name) {
+                row![
+                    text(name.clone()).color(color).size(13).width(Length::Fill),
+                    text(icons::ICON_HEART)
+                        .font(icons::NERD_FONT_MONO)
+                        .size(26)
+                        .color(theme::red()),
+                    Space::with_width(Length::Fixed(6.0)),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center)
+                .into()
+            } else {
+                text(name.clone()).color(color).size(13).width(Length::Fill).into()
+            };
+            let btn = button(label)
                 .on_press(msg)
                 .style(iced::widget::button::text)
                 .width(Length::Fill)
@@ -314,6 +337,7 @@ fn playlist_panel_view(state: &AppState) -> Element<'_, Message> {
         let selected_pl = state.selected_playlist.clone();
         let autoplaylists: Vec<(&'static str, &'static str, iced::Color)> = vec![
             ("Liked Songs", icons::ICON_HEART, theme::red()),
+            ("Liked Albums", icons::ICON_LIST, theme::red()),
             ("Recently Played", icons::ICON_CLOCK, theme::accent()),
             ("Most Played", icons::ICON_PODIUM, theme::green()),
         ];
@@ -630,9 +654,21 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
             groups.push((track.album.clone(), vec![track.clone()]));
         }
 
+        let fav_albums = crate::persist::get(|db| db.favorite_albums.clone());
         for (album_name, tracks) in groups {
             let count = tracks.len();
             let album_label = album_name.clone();
+            let is_fav = fav_albums.contains(&album_name);
+            // Coração: marcador de favorito e também botão para alternar.
+            let fav_btn = button(
+                text(icons::ICON_HEART)
+                    .font(icons::NERD_FONT_MONO)
+                    .size(26)
+                    .color(if is_fav { theme::red() } else { theme::overlay0() }),
+            )
+            .on_press(Message::ToggleFavoriteAlbum(album_name.clone()))
+            .style(iced::widget::button::text)
+            .padding([0, 4]);
             let album_hdr: Element<Message> = container(
                 row![
                     text(icons::ICON_LIST)
@@ -644,6 +680,7 @@ fn track_list_view(state: &AppState) -> Element<'_, Message> {
                         .color(theme::accent())
                         .font(icons::UI_FONT_BOLD)
                         .width(Length::Fill),
+                    fav_btn,
                     text(format!("{count} tracks")).size(11).color(theme::overlay0()),
                 ]
                 .spacing(8)

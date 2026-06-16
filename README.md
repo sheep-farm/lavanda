@@ -23,7 +23,9 @@ A native Wayland music player written in Rust, built for [Omarchy](https://omarc
 - **Indexed library** — `~/Music` is scanned on launch and browsed by **Artists**, **Albums** or **Genres** from the sidebar
 - **Sortable, configurable columns** — title, artist, album, genre, year, disc, duration, play count, date played; click a header to sort, right-click to show/hide columns
 - **Playlists** — create, rename (double-click), delete custom playlists; add tracks or whole albums via right-click
-- **Auto-playlists** — Liked Songs, Recently Played and Most Played, maintained automatically
+- **Auto-playlists** — Liked Songs, Liked Albums, Recently Played and Most Played, maintained automatically
+- **Favorite albums** — mark whole albums via right-click or the heart on the album group header; favorited albums show a heart in the sidebar and collect under the **Liked Albums** auto-playlist
+- **Gapless playback** — the next track is prefetched and chained into the same output buffer, so albums play through with no silence or clipped tails between tracks
 - **Internet radio** — a **Radios** tab backed by the [radio-browser.info](https://www.radio-browser.info/) directory plus a curated [SomaFM](https://somafm.com/) shortcut: search/browse stations, play Icecast/Shoutcast streams with live "now playing" (ICY) metadata, star favorites, and quarantine dead stations to hide them. The tab disables itself automatically when offline
 - **Liked songs & play counts** — toggle a favorite with `l`/`f`; plays are counted and persisted to `~/.config/lavanda/db.json`
 - **Multi-selection** — `Ctrl+Click` to toggle, `Shift+Click` to range-select; context-menu actions apply to the whole selection
@@ -289,7 +291,6 @@ Track metadata lives in memory for the session; library state (likes, play count
 
 Known limitations:
 - Seek accuracy depends on the container format (Symphonia limitation)
-- No gapless playback between tracks
 
 ---
 
