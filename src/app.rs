@@ -273,7 +273,7 @@ pub enum Message {
 
     // Jellyfin
     JellyfinConnect,
-    JellyfinArtistsLoaded(Result<Vec<crate::jellyfin::JellyfinItem>, String>),
+    JellyfinArtistsLoaded(Result<(String, Vec<crate::jellyfin::JellyfinItem>), String>),
     JellyfinSelectArtist(crate::jellyfin::JellyfinItem),
     JellyfinAlbumsLoaded(Result<Vec<crate::jellyfin::JellyfinItem>, String>),
     JellyfinSelectAlbum(crate::jellyfin::JellyfinItem),
@@ -393,6 +393,7 @@ pub struct AppState {
     pub show_spectrum: bool,
 
     // Jellyfin
+    pub jf_token: String,
     pub jf_artists: Vec<crate::jellyfin::JellyfinItem>,
     pub jf_albums: Vec<crate::jellyfin::JellyfinItem>,
     pub jf_tracks: Vec<Track>,
@@ -522,6 +523,7 @@ impl AppState {
             is_hovering_tracklist: false,
             is_hovering_sidebar_list: false,
             show_shortcuts: false,
+            jf_token: String::new(),
             jf_artists: Vec::new(),
             jf_albums: Vec::new(),
             jf_tracks: Vec::new(),
@@ -863,7 +865,7 @@ impl AppState {
             }
 
             Message::SidebarDragStart => { self.dragging_sidebar = true; Task::none() }
-            Message::SidebarDragMove(x) => { self.sidebar_width = x.clamp(120.0, 400.0); Task::none() }
+            Message::SidebarDragMove(x) => { self.sidebar_width = x.clamp(crate::config::min_sidebar_width(), 600.0); Task::none() }
             Message::SidebarDragEnd => {
                 self.dragging_sidebar = false;
                 save_sidebar_width(self.sidebar_width);
@@ -1859,11 +1861,23 @@ impl AppState {
                 self.jf_loading = true;
                 self.jf_error = None;
                 let url = cfg.jellyfin_url.clone();
-                let token = cfg.jellyfin_token.clone();
+                let static_token = cfg.jellyfin_token.clone();
+                let user = cfg.jellyfin_user.clone();
+                let password = cfg.jellyfin_password.clone();
                 Task::perform(
                     async move {
                         tokio::task::spawn_blocking(move || {
-                            crate::jellyfin::fetch_artists(&url, &token)
+                            let token = if !static_token.is_empty() {
+                                static_token
+                            } else if !user.is_empty() {
+                                crate::jellyfin::authenticate(&url, &user, &password)?
+                            } else {
+                                return Err(anyhow::anyhow!(
+                                    "configure jellyfin_token ou jellyfin_user em config.toml"
+                                ));
+                            };
+                            let artists = crate::jellyfin::fetch_artists(&url, &token)?;
+                            Ok((token, artists))
                         })
                         .await
                         .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
@@ -1876,7 +1890,8 @@ impl AppState {
             Message::JellyfinArtistsLoaded(result) => {
                 self.jf_loading = false;
                 match result {
-                    Ok(artists) => {
+                    Ok((token, artists)) => {
+                        self.jf_token = token;
                         self.jf_artists = artists;
                         self.jf_error = None;
                     }
@@ -1894,7 +1909,7 @@ impl AppState {
                 self.jf_loading = true;
                 self.jf_error = None;
                 let url = crate::config::get().jellyfin_url.clone();
-                let token = crate::config::get().jellyfin_token.clone();
+                let token = self.jf_token.clone();
                 let artist_id = artist.id.clone();
                 Task::perform(
                     async move {
@@ -1929,7 +1944,7 @@ impl AppState {
                 self.jf_loading = true;
                 self.jf_error = None;
                 let url = crate::config::get().jellyfin_url.clone();
-                let token = crate::config::get().jellyfin_token.clone();
+                let token = self.jf_token.clone();
                 let album_id = album.id.clone();
                 Task::perform(
                     async move {
@@ -2695,8 +2710,8 @@ impl AppState {
         let path_str = track.path.to_str().unwrap_or("").to_string();
         if let Some(id) = path_str.strip_prefix("jellyfin://") {
             let id = id.to_string();
-            let cfg = crate::config::get();
-            let url = crate::jellyfin::stream_url(&cfg.jellyfin_url, &id, &cfg.jellyfin_token);
+            let base_url = crate::config::get().jellyfin_url.clone();
+            let url = crate::jellyfin::stream_url(&base_url, &id, &self.jf_token);
             return self.play_remote_track(track, id, url);
         }
         if let Some(id) = path_str.strip_prefix("navidrome://") {

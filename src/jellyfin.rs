@@ -53,9 +53,6 @@ pub fn is_jellyfin_path(path: &Path) -> bool {
     path.to_str().map_or(false, |s| s.starts_with("jellyfin://"))
 }
 
-pub fn item_id_from_path(path: &Path) -> Option<String> {
-    path.to_str()?.strip_prefix("jellyfin://").map(|s| s.to_string())
-}
 
 pub fn stream_url(base_url: &str, item_id: &str, token: &str) -> String {
     format!(
@@ -64,6 +61,30 @@ pub fn stream_url(base_url: &str, item_id: &str, token: &str) -> String {
         item_id,
         token,
     )
+}
+
+/// Autentica via username/password e retorna o access token.
+/// Usar quando `jellyfin_token` não está configurado.
+pub fn authenticate(base_url: &str, user: &str, password: &str) -> Result<String> {
+    let url = format!("{}/Users/AuthenticateByName", base_url.trim_end_matches('/'));
+    let body = serde_json::json!({ "Username": user, "Pw": password });
+    let resp = ureq::post(&url)
+        .set("User-Agent", UA)
+        .set("Content-Type", "application/json")
+        .set(
+            "X-Emby-Authorization",
+            &format!(
+                "MediaBrowser Client=\"lavanda\", Device=\"lavanda\", DeviceId=\"lavanda\", Version=\"{}\"",
+                env!("CARGO_PKG_VERSION")
+            ),
+        )
+        .send_string(&body.to_string())
+        .map_err(|e| anyhow!("{e}"))?;
+    let json: serde_json::Value = resp.into_json()?;
+    json["AccessToken"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow!("autenticação falhou: resposta sem AccessToken"))
 }
 
 fn get(url: &str) -> Result<serde_json::Value> {

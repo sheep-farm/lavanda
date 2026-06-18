@@ -197,9 +197,10 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
     ]
     .spacing(0);
 
+    let sidebar_w = state.sidebar_width.max(crate::config::min_sidebar_width());
     container(sidebar_body)
         .style(theme::sidebar)
-        .width(Length::Fixed(state.sidebar_width))
+        .width(Length::Fixed(sidebar_w))
         .height(Length::Fill)
         .into()
 }

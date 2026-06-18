@@ -17,6 +17,8 @@ pub struct Config {
     pub volume_step: f32,
     pub jellyfin_url: String,
     pub jellyfin_token: String,
+    pub jellyfin_user: String,
+    pub jellyfin_password: String,
     pub navidrome_url: String,
     pub navidrome_user: String,
     pub navidrome_password: String,
@@ -34,6 +36,8 @@ impl Default for Config {
             volume_step: 0.05,
             jellyfin_url: String::new(),
             jellyfin_token: String::new(),
+            jellyfin_user: String::new(),
+            jellyfin_password: String::new(),
             navidrome_url: String::new(),
             navidrome_user: String::new(),
             navidrome_password: String::new(),
@@ -46,6 +50,16 @@ impl Config {
     pub fn music_path(&self) -> PathBuf {
         expand_tilde(&self.music_dir)
     }
+}
+
+/// Largura mínima do sidebar para que a barra de abas não transborde.
+/// Cresce automaticamente conforme serviços remotos são configurados.
+pub fn min_sidebar_width() -> f32 {
+    let cfg = get();
+    let mut min = 200.0_f32;
+    if !cfg.jellyfin_url.is_empty() { min += 90.0; }
+    if !cfg.navidrome_url.is_empty() { min += 100.0; }
+    min
 }
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
