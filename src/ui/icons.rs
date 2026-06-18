@@ -47,3 +47,4 @@ pub const ICON_LIST: &str = "\u{f0ca}"; //
 pub const ICON_CLOSE: &str = "\u{f00d}"; //
 pub const ICON_BROADCAST: &str = "\u{f043d}"; // 󰐽 radio tower
 pub const ICON_STAR: &str = "\u{f005}"; // ★ favorito de rádio
+pub const ICON_CLOUD: &str = "\u{f0c2}"; //  servidor remoto (Jellyfin)

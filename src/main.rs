@@ -1,6 +1,7 @@
 mod app;
 mod audio;
 mod config;
+mod jellyfin;
 mod library;
 mod locale;
 mod persist;

@@ -8,6 +8,35 @@ use crate::library::models::Track;
 use crate::persist::TableColumn;
 use crate::ui::{icons, theme};
 
+// ── Jellyfin helpers (para evitar repetição de código de loading/error) ────────
+
+fn loading_indicator<'a>() -> Element<'a, Message> {
+    container(text("Loading…").size(14).color(theme::overlay0()))
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+fn error_indicator<'a>(msg: &str) -> Element<'a, Message> {
+    container(text(format!("Error: {msg}")).size(13).color(theme::red()))
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+fn hint_indicator<'a>(msg: &'static str) -> Element<'a, Message> {
+    container(text(msg).size(14).color(theme::overlay0()))
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
 const ROW_H: f32 = 34.0;
 /// Largura da coluna de favorito (coração), compartilhada entre header e linhas.
 const LIKE_COL_W: f32 = 60.0;
@@ -28,6 +57,8 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
 
     let main_panel = if state.view_mode == ViewMode::Radios {
         radio_panel_view(state)
+    } else if state.view_mode == ViewMode::Jellyfin {
+        jf_main_panel_view(state)
     } else {
         track_list_view(state)
     };
@@ -64,7 +95,7 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
         .into()
     };
 
-    let tabs = row![
+    let mut tabs = row![
         tab_btn("Artists", ViewMode::Artists, icons::ICON_MUSIC, true),
         tab_btn("Albums", ViewMode::Albums, icons::ICON_LIST, true),
         tab_btn("Genres", ViewMode::Genres, icons::ICON_PODIUM, true),
@@ -73,13 +104,25 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
     ]
     .spacing(4);
 
+    // Aba Jellyfin só aparece se jellyfin_url estiver configurado.
+    if !crate::config::get().jellyfin_url.is_empty() {
+        tabs = tabs.push(tab_btn("Jellyfin", ViewMode::Jellyfin, icons::ICON_CLOUD, true));
+    }
+
+    let (search_value, search_msg): (&str, fn(String) -> Message) =
+        if state.view_mode == ViewMode::Jellyfin {
+            (&state.jf_sidebar_search, Message::JellyfinSidebarSearchChanged)
+        } else {
+            (&state.sidebar_search, Message::SidebarSearchChanged)
+        };
+
     let sidebar_search = row![
         text(icons::ICON_SEARCH)
             .font(icons::NERD_FONT_MONO)
             .size(22)
             .color(theme::overlay0()),
-        text_input("Filter…", &state.sidebar_search)
-            .on_input(Message::SidebarSearchChanged)
+        text_input("Filter…", search_value)
+            .on_input(search_msg)
             .style(theme::dialog_input)
             .size(12)
             .padding([3, 6])
@@ -109,6 +152,7 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
             build_sidebar_list(items, selected, None, Message::SelectGenre, None, false)
         }
         ViewMode::Radios => radio_favorites_list(state),
+        ViewMode::Jellyfin => jf_sidebar_artists(state),
     };
 
     let list_with_context: Element<Message> = mouse_area(
@@ -1002,4 +1046,172 @@ fn table_col_to_sort(col: TableColumn) -> SortColumn {
         TableColumn::Plays => SortColumn::Plays,
         TableColumn::DatePlayed => SortColumn::DatePlayed,
     }
+}
+
+// ── Jellyfin ──────────────────────────────────────────────────────────────────
+
+/// Lista de artistas na sidebar (aba Jellyfin).
+fn jf_sidebar_artists(state: &AppState) -> Element<'static, Message> {
+    if state.jf_loading {
+        return container(text("Loading…").size(13).color(theme::overlay0()))
+            .padding([12, 10])
+            .width(Length::Fill)
+            .into();
+    }
+    if let Some(ref err) = state.jf_error {
+        return container(text(err.clone()).size(12).color(theme::red()))
+            .padding([8, 10])
+            .width(Length::Fill)
+            .into();
+    }
+    if state.jf_artists.is_empty() {
+        return container(
+            text("No artists found.\nCheck jellyfin_url in config.toml.")
+                .size(12)
+                .color(theme::overlay0()),
+        )
+        .padding([12, 10])
+        .width(Length::Fill)
+        .into();
+    }
+
+    let query = state.jf_sidebar_search.to_lowercase();
+    let selected_id = state.jf_selected_artist.as_ref().map(|a| a.id.clone());
+
+    let rows: Vec<Element<'static, Message>> = state
+        .jf_artists
+        .iter()
+        .filter(|a| query.is_empty() || a.name.to_lowercase().contains(&query))
+        .map(|artist| {
+            let is_selected = selected_id.as_deref() == Some(artist.id.as_str());
+            let color = if is_selected { theme::accent() } else { theme::text() };
+            let artist = artist.clone();
+            let btn = button(
+                text(artist.name.clone())
+                    .size(13)
+                    .color(color)
+                    .width(Length::Fill),
+            )
+            .on_press(Message::JellyfinSelectArtist(artist))
+            .style(iced::widget::button::text)
+            .width(Length::Fill)
+            .padding([5, 10]);
+
+            if is_selected {
+                container(btn)
+                    .style(theme::selected_row)
+                    .width(Length::Fill)
+                    .into()
+            } else {
+                container(btn).width(Length::Fill).into()
+            }
+        })
+        .collect();
+
+    column(rows).spacing(1).into()
+}
+
+/// Painel principal da aba Jellyfin.
+fn jf_main_panel_view(state: &AppState) -> Element<'_, Message> {
+    if let Some(ref err) = state.jf_error {
+        return error_indicator(err);
+    }
+
+    if state.jf_selected_album.is_some() {
+        return jf_track_list_view(state);
+    }
+
+    if state.jf_selected_artist.is_some() {
+        return jf_albums_panel_view(state);
+    }
+
+    hint_indicator("Select an artist")
+}
+
+/// Lista de álbuns do artista selecionado.
+fn jf_albums_panel_view(state: &AppState) -> Element<'_, Message> {
+    if state.jf_loading {
+        return loading_indicator();
+    }
+    if state.jf_albums.is_empty() {
+        return hint_indicator("No albums found");
+    }
+
+    let selected_id = state.jf_selected_album.as_ref().map(|a| a.id.clone());
+
+    let rows: Vec<Element<Message>> = state
+        .jf_albums
+        .iter()
+        .map(|album| {
+            let is_sel = selected_id.as_deref() == Some(album.id.as_str());
+            let color = if is_sel { theme::accent() } else { theme::text() };
+            let album = album.clone();
+            let btn = button(
+                text(album.name.clone())
+                    .size(13)
+                    .color(color)
+                    .width(Length::Fill),
+            )
+            .on_press(Message::JellyfinSelectAlbum(album))
+            .style(iced::widget::button::text)
+            .width(Length::Fill)
+            .padding([6, 16]);
+
+            if is_sel {
+                container(btn)
+                    .style(theme::selected_row)
+                    .width(Length::Fill)
+                    .into()
+            } else {
+                container(btn).width(Length::Fill).into()
+            }
+        })
+        .collect();
+
+    scrollable(column(rows).spacing(1))
+        .height(Length::Fill)
+        .into()
+}
+
+/// Tracklist do álbum Jellyfin selecionado (reutiliza estilos da tracklist local).
+fn jf_track_list_view(state: &AppState) -> Element<'_, Message> {
+    if state.jf_loading {
+        return loading_indicator();
+    }
+    if state.jf_tracks.is_empty() {
+        return hint_indicator("No tracks found");
+    }
+
+    let visible_cols = crate::persist::get(|db| db.table_columns.clone());
+    let col_widths = column_widths(&visible_cols);
+    let header = build_column_header(visible_cols.clone(), col_widths.clone(), None, true);
+
+    let current_id = state.current_track.as_ref().map(|t| t.id);
+    let selected_ids: Vec<i64> = state.selected_tracks.iter().map(|t| t.id).collect();
+    let multi_selected = state.selected_tracks.clone();
+
+    let rows: Vec<Element<Message>> = state
+        .jf_tracks
+        .iter()
+        .map(|track| {
+            build_track_row(
+                track.clone(),
+                current_id,
+                &selected_ids,
+                &multi_selected,
+                visible_cols.clone(),
+                col_widths.clone(),
+            )
+        })
+        .collect();
+
+    let scroll = scrollable(column(rows).spacing(0))
+        .id(scrollable::Id::new("jf_tracklist_scroll"))
+        .height(Length::Fill);
+
+    column![header, scroll]
+        .spacing(0)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }

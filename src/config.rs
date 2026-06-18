@@ -15,6 +15,8 @@ pub struct Config {
     pub language: String,
     pub seek_step: u64,
     pub volume_step: f32,
+    pub jellyfin_url: String,
+    pub jellyfin_token: String,
 }
 
 impl Default for Config {
@@ -27,6 +29,8 @@ impl Default for Config {
             language: "auto".into(),
             seek_step: 5,
             volume_step: 0.05,
+            jellyfin_url: String::new(),
+            jellyfin_token: String::new(),
         }
     }
 }
@@ -118,4 +122,8 @@ seek_step = 5
 
 # Volume delta per + / - keypress
 volume_step = 0.05
+
+# Jellyfin integration (optional)
+# jellyfin_url   = "http://your-jellyfin-server:8096"
+# jellyfin_token = "your-api-key"
 "#;

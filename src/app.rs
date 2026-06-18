@@ -32,6 +32,7 @@ pub enum ViewMode {
     Albums,
     Genres,
     Radios,
+    Jellyfin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,6 +269,15 @@ pub enum Message {
 
     // Open local folder
     OpenLocalFolder(PathBuf),
+
+    // Jellyfin
+    JellyfinConnect,
+    JellyfinArtistsLoaded(Result<Vec<crate::jellyfin::JellyfinItem>, String>),
+    JellyfinSelectArtist(crate::jellyfin::JellyfinItem),
+    JellyfinAlbumsLoaded(Result<Vec<crate::jellyfin::JellyfinItem>, String>),
+    JellyfinSelectAlbum(crate::jellyfin::JellyfinItem),
+    JellyfinTracksLoaded(Result<Vec<Track>, String>),
+    JellyfinSidebarSearchChanged(String),
 }
 
 // ── Estado global ─────────────────────────────────────────────────────────────
@@ -371,6 +381,17 @@ pub struct AppState {
     pub layout: Layout,
     pub spectrum: Vec<f32>,
     pub show_spectrum: bool,
+
+    // Jellyfin
+    pub jf_artists: Vec<crate::jellyfin::JellyfinItem>,
+    pub jf_albums: Vec<crate::jellyfin::JellyfinItem>,
+    pub jf_tracks: Vec<Track>,
+    pub jf_selected_artist: Option<crate::jellyfin::JellyfinItem>,
+    pub jf_selected_album: Option<crate::jellyfin::JellyfinItem>,
+    pub jf_loading: bool,
+    pub jf_error: Option<String>,
+    pub current_jf_item_id: Option<String>,
+    pub jf_sidebar_search: String,
 
     // Tema
     pub iced_theme: Theme,
@@ -479,6 +500,15 @@ impl AppState {
             is_hovering_tracklist: false,
             is_hovering_sidebar_list: false,
             show_shortcuts: false,
+            jf_artists: Vec::new(),
+            jf_albums: Vec::new(),
+            jf_tracks: Vec::new(),
+            jf_selected_artist: None,
+            jf_selected_album: None,
+            jf_loading: false,
+            jf_error: None,
+            current_jf_item_id: None,
+            jf_sidebar_search: String::new(),
             layout: Layout::Standard,
             spectrum: vec![0.0; crate::audio::spectrum::NUM_BARS],
             show_spectrum: true,
@@ -632,8 +662,7 @@ impl AppState {
                         self.tracks = Vec::new();
                     }
                 }
-                ViewMode::Radios => {
-                    // A aba Radios usa seu próprio painel; a lista de faixas fica vazia.
+                ViewMode::Radios | ViewMode::Jellyfin => {
                     self.tracks = Vec::new();
                 }
             }
@@ -840,6 +869,12 @@ impl AppState {
                     ViewMode::Artists => { self.selected_artist = self.artists().first().cloned(); }
                     ViewMode::Albums => { self.selected_album = self.albums().first().cloned(); }
                     ViewMode::Genres => { self.selected_genre = self.genres().first().cloned(); }
+                    ViewMode::Jellyfin => {
+                        if self.jf_artists.is_empty() && !self.jf_loading {
+                            return Task::done(Message::JellyfinConnect);
+                        }
+                        return Task::none();
+                    }
                     ViewMode::Radios => {
                         // Carrega a lista de países uma vez (para o seletor).
                         let load_countries = if self.radio_countries.is_empty() {
@@ -1106,7 +1141,11 @@ impl AppState {
 
             Message::DoubleClickTrack(track) => {
                 self.selected_track = Some(track.clone());
-                self.queue = self.tracks.clone();
+                if crate::jellyfin::is_jellyfin_path(&track.path) {
+                    self.queue = self.jf_tracks.clone();
+                } else {
+                    self.queue = self.tracks.clone();
+                }
                 self.play_track_internal(track)
             }
 
@@ -1771,6 +1810,122 @@ impl AppState {
                 Task::none()
             }
 
+            // ── Jellyfin ──────────────────────────────────────────────────────
+
+            Message::JellyfinConnect => {
+                let cfg = crate::config::get();
+                if cfg.jellyfin_url.is_empty() {
+                    self.jf_error = Some("jellyfin_url não configurado em config.toml".into());
+                    return Task::none();
+                }
+                self.jf_loading = true;
+                self.jf_error = None;
+                let url = cfg.jellyfin_url.clone();
+                let token = cfg.jellyfin_token.clone();
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            crate::jellyfin::fetch_artists(&url, &token)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                        .map_err(|e| e.to_string())
+                    },
+                    Message::JellyfinArtistsLoaded,
+                )
+            }
+
+            Message::JellyfinArtistsLoaded(result) => {
+                self.jf_loading = false;
+                match result {
+                    Ok(artists) => {
+                        self.jf_artists = artists;
+                        self.jf_error = None;
+                    }
+                    Err(e) => {
+                        self.jf_error = Some(e);
+                    }
+                }
+                Task::none()
+            }
+
+            Message::JellyfinSelectArtist(artist) => {
+                self.jf_selected_artist = Some(artist.clone());
+                self.jf_selected_album = None;
+                self.jf_tracks = Vec::new();
+                self.jf_loading = true;
+                self.jf_error = None;
+                let url = crate::config::get().jellyfin_url.clone();
+                let token = crate::config::get().jellyfin_token.clone();
+                let artist_id = artist.id.clone();
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            crate::jellyfin::fetch_albums(&url, &token, &artist_id)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                        .map_err(|e| e.to_string())
+                    },
+                    Message::JellyfinAlbumsLoaded,
+                )
+            }
+
+            Message::JellyfinAlbumsLoaded(result) => {
+                self.jf_loading = false;
+                match result {
+                    Ok(albums) => {
+                        self.jf_albums = albums;
+                        self.jf_error = None;
+                    }
+                    Err(e) => {
+                        self.jf_error = Some(e);
+                    }
+                }
+                Task::none()
+            }
+
+            Message::JellyfinSelectAlbum(album) => {
+                self.jf_selected_album = Some(album.clone());
+                self.jf_tracks = Vec::new();
+                self.jf_loading = true;
+                self.jf_error = None;
+                let url = crate::config::get().jellyfin_url.clone();
+                let token = crate::config::get().jellyfin_token.clone();
+                let album_id = album.id.clone();
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            crate::jellyfin::fetch_tracks(&url, &token, &album_id)
+                                .map(|tracks| tracks.iter().map(|t| t.to_track()).collect::<Vec<_>>())
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                        .map_err(|e| e.to_string())
+                    },
+                    Message::JellyfinTracksLoaded,
+                )
+            }
+
+            Message::JellyfinTracksLoaded(result) => {
+                self.jf_loading = false;
+                match result {
+                    Ok(tracks) => {
+                        self.jf_tracks = tracks;
+                        self.jf_error = None;
+                    }
+                    Err(e) => {
+                        self.jf_error = Some(e);
+                    }
+                }
+                Task::none()
+            }
+
+            Message::JellyfinSidebarSearchChanged(q) => {
+                self.jf_sidebar_search = q;
+                Task::none()
+            }
+
             // ── Open local folder ─────────────────────────────────────────────
 
             Message::OpenLocalFolder(path) => {
@@ -1829,7 +1984,24 @@ impl AppState {
                     }
                 }
                 AudioEvent::TrackEnded => {
-                    // Fim da fila (o avanço normal é tratado por TrackAdvanced).
+                    if self.current_jf_item_id.is_some() {
+                        // Avança a fila Jellyfin manualmente (sem gapless)
+                        let next = {
+                            let cur_id = self.current_track.as_ref().map(|t| t.id);
+                            let cur_pos = cur_id
+                                .and_then(|id| self.queue.iter().position(|t| t.id == id));
+                            match cur_pos {
+                                Some(i) if i + 1 < self.queue.len() => {
+                                    Some(self.queue[i + 1].clone())
+                                }
+                                _ => None,
+                            }
+                        };
+                        if let Some(track) = next {
+                            return self.play_jf_track(track);
+                        }
+                        self.current_jf_item_id = None;
+                    }
                     self.playback_state = PlaybackState::Stopped;
                     self.position = Duration::ZERO;
                     self.send_mpris(MprisUpdate::Status(PlaybackStatus::Stopped));
@@ -2196,28 +2368,42 @@ impl AppState {
                 (format!("Album: {name}"), Some(album_btns), create)
             }
             ContextMenuTarget::Track(track) => {
-                let like_label = if track.liked { "Unlike this song" } else { "Like this song" };
-                let extra: Element<Message> = column![
-                    button(text(like_label).size(12))
-                        .on_press(Message::ToggleLikeTrack(track.clone()))
-                        .style(item_style).padding([4, 8]).width(Length::Fill),
-                    button(text("Edit ID3 tag").size(12))
-                        .on_press(Message::OpenTagEditor(vec![track.clone()]))
-                        .style(item_style).padding([4, 8]).width(Length::Fill),
-                    button(text("Open file folder").size(12))
-                        .on_press(Message::OpenLocalFolder(track.path.clone()))
-                        .style(item_style).padding([4, 8]).width(Length::Fill),
-                ].spacing(4).into();
-                for pl in &custom_playlists {
-                    playlist_section = playlist_section.push(
-                        button(text(format!("  + {pl}")).size(12))
-                            .on_press(Message::AddTracksToPlaylist(pl.clone(), vec![track.clone()]))
-                            .style(item_style).padding([4, 8]).width(Length::Fill)
-                    );
+                let is_jf = crate::jellyfin::is_jellyfin_path(&track.path);
+                let extra: Element<Message> = if is_jf {
+                    // Faixas Jellyfin: sem edição local
+                    Space::with_height(0).into()
+                } else {
+                    let like_label = if track.liked { "Unlike this song" } else { "Like this song" };
+                    column![
+                        button(text(like_label).size(12))
+                            .on_press(Message::ToggleLikeTrack(track.clone()))
+                            .style(item_style).padding([4, 8]).width(Length::Fill),
+                        button(text("Edit ID3 tag").size(12))
+                            .on_press(Message::OpenTagEditor(vec![track.clone()]))
+                            .style(item_style).padding([4, 8]).width(Length::Fill),
+                        button(text("Open file folder").size(12))
+                            .on_press(Message::OpenLocalFolder(track.path.clone()))
+                            .style(item_style).padding([4, 8]).width(Length::Fill),
+                    ]
+                    .spacing(4)
+                    .into()
+                };
+                if !is_jf {
+                    for pl in &custom_playlists {
+                        playlist_section = playlist_section.push(
+                            button(text(format!("  + {pl}")).size(12))
+                                .on_press(Message::AddTracksToPlaylist(pl.clone(), vec![track.clone()]))
+                                .style(item_style).padding([4, 8]).width(Length::Fill)
+                        );
+                    }
                 }
-                let create: Element<Message> = button(text("+ Create playlist with song").size(12))
-                    .on_press(Message::CreatePlaylistWithTracks(track.title.clone(), vec![track.clone()]))
-                    .style(accent_item_style).padding([4, 8]).width(Length::Fill).into();
+                let create: Element<Message> = if is_jf {
+                    Space::with_height(0).into()
+                } else {
+                    button(text("+ Create playlist with song").size(12))
+                        .on_press(Message::CreatePlaylistWithTracks(track.title.clone(), vec![track.clone()]))
+                        .style(accent_item_style).padding([4, 8]).width(Length::Fill).into()
+                };
                 (format!("Song: {}", track.title), Some(extra), create)
             }
             ContextMenuTarget::MultipleTracks(tracks) => {
@@ -2361,10 +2547,35 @@ impl AppState {
     // ── Helpers de reprodução ─────────────────────────────────────────────────
 
     fn play_track_internal(&mut self, track: Track) -> Task<Message> {
-        // Salto explícito: corta o áudio atual e começa do zero.
+        if crate::jellyfin::is_jellyfin_path(&track.path) {
+            return self.play_jf_track(track);
+        }
+        self.current_jf_item_id = None;
         self.audio.send(AudioCommand::Play(track.path.clone()));
         self.audio.send(AudioCommand::SetVolume(self.volume));
         self.set_now_playing(track)
+    }
+
+    fn play_jf_track(&mut self, track: Track) -> Task<Message> {
+        let item_id = crate::jellyfin::item_id_from_path(&track.path)
+            .unwrap_or_default();
+        let cfg = crate::config::get();
+        let url = crate::jellyfin::stream_url(&cfg.jellyfin_url, &item_id, &cfg.jellyfin_token);
+        self.audio.send(AudioCommand::PlayStream { url, codec: String::new() });
+        self.audio.send(AudioCommand::SetVolume(self.volume));
+        self.current_jf_item_id = Some(item_id);
+        self.current_station = None;
+        self.stream_title = None;
+        self.current_track = Some(track.clone());
+        self.selected_track = Some(track.clone());
+        self.playback_state = PlaybackState::Playing;
+        self.position = Duration::ZERO;
+        self.duration = Duration::ZERO;
+        self.notify_mpris_track(PlaybackStatus::Playing);
+        send_track_notification(&track.title, &track.artist);
+        // Informa None ao audio thread — sem gapless para Jellyfin
+        self.audio.send(AudioCommand::SetNext(None));
+        Task::none()
     }
 
     /// Atualiza o estado "tocando agora" (capa, MPRIS, play count, prefetch da
@@ -2464,6 +2675,8 @@ impl AppState {
     /// Informa o audio thread qual será a próxima faixa (prefetch gapless).
     fn update_next(&self) {
         let next = self.peek_next().map(|t| t.path);
+        // Jellyfin tracks não suportam gapless: o audio thread não abre jellyfin://
+        let next = next.filter(|p| !crate::jellyfin::is_jellyfin_path(p));
         self.audio.send(AudioCommand::SetNext(next));
     }
 
