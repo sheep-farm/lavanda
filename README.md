@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/badge/version-1.0.2--dev-blue.svg)](Cargo.toml)
 [![Wayland](https://img.shields.io/badge/Wayland-native-cyan.svg)](https://wayland.freedesktop.org)
 
-**lavanda** is a minimalist music player for the Linux desktop, built for [Omarchy](https://omarchy.org/) / Hyprland rices and tiling window manager workflows.
+**lavanda** is a minimalist music player for the Linux desktop. Written with [Omarchy](https://omarchy.org/) / Hyprland rices and tiling window manager workflows in mind, it runs on any compatible Linux distribution.
 
 The guiding principle is restraint: every feature and every element on screen must earn its place. lavanda is not trying to be Spotify, Deezer, or YouTube Music. There are no recommendations, no discovery feeds, no social layers. lavanda exists for one purpose — to get out of the way and let you enjoy the music you already love.
 
