@@ -59,6 +59,8 @@ pub fn view(state: &AppState) -> Element<'_, Message> {
         radio_panel_view(state)
     } else if state.view_mode == ViewMode::Jellyfin {
         jf_main_panel_view(state)
+    } else if state.view_mode == ViewMode::Navidrome {
+        nd_main_panel_view(state)
     } else {
         track_list_view(state)
     };
@@ -104,14 +106,19 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
     ]
     .spacing(4);
 
-    // Aba Jellyfin só aparece se jellyfin_url estiver configurado.
-    if !crate::config::get().jellyfin_url.is_empty() {
+    let cfg = crate::config::get();
+    if !cfg.jellyfin_url.is_empty() {
         tabs = tabs.push(tab_btn("Jellyfin", ViewMode::Jellyfin, icons::ICON_CLOUD, true));
+    }
+    if !cfg.navidrome_url.is_empty() {
+        tabs = tabs.push(tab_btn("Navidrome", ViewMode::Navidrome, icons::ICON_CLOUD, true));
     }
 
     let (search_value, search_msg): (&str, fn(String) -> Message) =
         if state.view_mode == ViewMode::Jellyfin {
             (&state.jf_sidebar_search, Message::JellyfinSidebarSearchChanged)
+        } else if state.view_mode == ViewMode::Navidrome {
+            (&state.nd_sidebar_search, Message::NavidromeSidebarSearchChanged)
         } else {
             (&state.sidebar_search, Message::SidebarSearchChanged)
         };
@@ -153,6 +160,7 @@ fn sidebar_view(state: &AppState) -> Element<'_, Message> {
         }
         ViewMode::Radios => radio_favorites_list(state),
         ViewMode::Jellyfin => jf_sidebar_artists(state),
+        ViewMode::Navidrome => nd_sidebar_artists(state),
     };
 
     let list_with_context: Element<Message> = mouse_area(
@@ -1173,15 +1181,19 @@ fn jf_albums_panel_view(state: &AppState) -> Element<'_, Message> {
         .into()
 }
 
-/// Tracklist do álbum Jellyfin selecionado (reutiliza estilos da tracklist local).
+/// Tracklist do álbum Jellyfin selecionado.
 fn jf_track_list_view(state: &AppState) -> Element<'_, Message> {
-    if state.jf_loading {
-        return loading_indicator();
-    }
-    if state.jf_tracks.is_empty() {
-        return hint_indicator("No tracks found");
-    }
+    if state.jf_loading { return loading_indicator(); }
+    if state.jf_tracks.is_empty() { return hint_indicator("No tracks found"); }
+    remote_track_list_view(state, &state.jf_tracks.clone(), "jf_tracklist_scroll")
+}
 
+/// Tracklist compartilhada para fontes remotas (Jellyfin e Navidrome).
+fn remote_track_list_view<'a>(
+    state: &'a AppState,
+    tracks: &[Track],
+    scroll_id: &'static str,
+) -> Element<'a, Message> {
     let visible_cols = crate::persist::get(|db| db.table_columns.clone());
     let col_widths = column_widths(&visible_cols);
     let header = build_column_header(visible_cols.clone(), col_widths.clone(), None, true);
@@ -1190,8 +1202,7 @@ fn jf_track_list_view(state: &AppState) -> Element<'_, Message> {
     let selected_ids: Vec<i64> = state.selected_tracks.iter().map(|t| t.id).collect();
     let multi_selected = state.selected_tracks.clone();
 
-    let rows: Vec<Element<Message>> = state
-        .jf_tracks
+    let rows: Vec<Element<Message>> = tracks
         .iter()
         .map(|track| {
             build_track_row(
@@ -1206,12 +1217,123 @@ fn jf_track_list_view(state: &AppState) -> Element<'_, Message> {
         .collect();
 
     let scroll = scrollable(column(rows).spacing(0))
-        .id(scrollable::Id::new("jf_tracklist_scroll"))
+        .id(scrollable::Id::new(scroll_id))
         .height(Length::Fill);
 
     column![header, scroll]
         .spacing(0)
         .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+}
+
+// ── Navidrome ─────────────────────────────────────────────────────────────────
+
+fn nd_sidebar_artists(state: &AppState) -> Element<'static, Message> {
+    if state.nd_loading {
+        return container(text("Loading…").size(13).color(theme::overlay0()))
+            .padding([12, 10])
+            .width(Length::Fill)
+            .into();
+    }
+    if let Some(ref err) = state.nd_error {
+        return container(text(err.clone()).size(12).color(theme::red()))
+            .padding([8, 10])
+            .width(Length::Fill)
+            .into();
+    }
+    if state.nd_artists.is_empty() {
+        return container(
+            text("No artists found.\nCheck navidrome_url in config.toml.")
+                .size(12)
+                .color(theme::overlay0()),
+        )
+        .padding([12, 10])
+        .width(Length::Fill)
+        .into();
+    }
+
+    let query = state.nd_sidebar_search.to_lowercase();
+    let selected_id = state.nd_selected_artist.as_ref().map(|a| a.id.clone());
+
+    let rows: Vec<Element<'static, Message>> = state
+        .nd_artists
+        .iter()
+        .filter(|a| query.is_empty() || a.name.to_lowercase().contains(&query))
+        .map(|artist| {
+            let is_selected = selected_id.as_deref() == Some(artist.id.as_str());
+            let color = if is_selected { theme::accent() } else { theme::text() };
+            let artist = artist.clone();
+            let btn = button(
+                text(artist.name.clone())
+                    .size(13)
+                    .color(color)
+                    .width(Length::Fill),
+            )
+            .on_press(Message::NavidromeSelectArtist(artist))
+            .style(iced::widget::button::text)
+            .width(Length::Fill)
+            .padding([5, 10]);
+
+            if is_selected {
+                container(btn).style(theme::selected_row).width(Length::Fill).into()
+            } else {
+                container(btn).width(Length::Fill).into()
+            }
+        })
+        .collect();
+
+    column(rows).spacing(1).into()
+}
+
+fn nd_main_panel_view(state: &AppState) -> Element<'_, Message> {
+    if let Some(ref err) = state.nd_error {
+        return error_indicator(err);
+    }
+    if state.nd_selected_album.is_some() {
+        if state.nd_loading { return loading_indicator(); }
+        if state.nd_tracks.is_empty() { return hint_indicator("No tracks found"); }
+        return remote_track_list_view(state, &state.nd_tracks.clone(), "nd_tracklist_scroll");
+    }
+    if state.nd_selected_artist.is_some() {
+        return nd_albums_panel_view(state);
+    }
+    hint_indicator("Select an artist")
+}
+
+fn nd_albums_panel_view(state: &AppState) -> Element<'_, Message> {
+    if state.nd_loading { return loading_indicator(); }
+    if state.nd_albums.is_empty() { return hint_indicator("No albums found"); }
+
+    let selected_id = state.nd_selected_album.as_ref().map(|a| a.id.clone());
+
+    let rows: Vec<Element<Message>> = state
+        .nd_albums
+        .iter()
+        .map(|album| {
+            let is_sel = selected_id.as_deref() == Some(album.id.as_str());
+            let color = if is_sel { theme::accent() } else { theme::text() };
+            let album = album.clone();
+            let btn = button(
+                text(album.name.clone())
+                    .size(13)
+                    .color(color)
+                    .width(Length::Fill),
+            )
+            .on_press(Message::NavidromeSelectAlbum(album))
+            .style(iced::widget::button::text)
+            .width(Length::Fill)
+            .padding([6, 16]);
+
+            if is_sel {
+                container(btn).style(theme::selected_row).width(Length::Fill).into()
+            } else {
+                container(btn).width(Length::Fill).into()
+            }
+        })
+        .collect();
+
+    scrollable(column(rows).spacing(1))
         .height(Length::Fill)
         .into()
 }

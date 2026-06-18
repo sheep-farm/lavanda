@@ -3,6 +3,7 @@ mod audio;
 mod config;
 mod jellyfin;
 mod library;
+mod navidrome;
 mod locale;
 mod persist;
 mod radio;

@@ -17,6 +17,9 @@ pub struct Config {
     pub volume_step: f32,
     pub jellyfin_url: String,
     pub jellyfin_token: String,
+    pub navidrome_url: String,
+    pub navidrome_user: String,
+    pub navidrome_password: String,
 }
 
 impl Default for Config {
@@ -31,6 +34,9 @@ impl Default for Config {
             volume_step: 0.05,
             jellyfin_url: String::new(),
             jellyfin_token: String::new(),
+            navidrome_url: String::new(),
+            navidrome_user: String::new(),
+            navidrome_password: String::new(),
         }
     }
 }
@@ -126,4 +132,9 @@ volume_step = 0.05
 # Jellyfin integration (optional)
 # jellyfin_url   = "http://your-jellyfin-server:8096"
 # jellyfin_token = "your-api-key"
+
+# Navidrome integration (optional — also works with any Subsonic-compatible server)
+# navidrome_url      = "http://your-navidrome:4533"
+# navidrome_user     = "username"
+# navidrome_password = "password"
 "#;

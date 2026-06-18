@@ -34,6 +34,7 @@ Follows the active Omarchy theme automatically — colors update live when you s
 - **Gapless playback** — the next track is prefetched and chained into the same output buffer, so albums play through with no silence or clipped tails between tracks
 - **Internet radio** — a **Radios** tab backed by the [radio-browser.info](https://www.radio-browser.info/) directory plus a curated [SomaFM](https://somafm.com/) shortcut: search/browse stations, play Icecast/Shoutcast streams with live "now playing" (ICY) metadata, star favorites, and quarantine dead stations to hide them. The tab disables itself automatically when offline
 - **Jellyfin** — optional **Jellyfin** tab that streams from a self-hosted [Jellyfin](https://jellyfin.org/) server: browse artists → albums → tracks, play, and use the same N/P/shuffle controls as the local library. The tab only appears when `jellyfin_url` is set in `config.toml`; not configured = zero UI change
+- **Navidrome** — optional **Navidrome** tab with the same UX as Jellyfin, backed by the [Subsonic API](http://www.subsonic.org/pages/api.jsp); compatible with Navidrome, Airsonic, Subsonic and any Subsonic-compatible server. The tab only appears when `navidrome_url` is set in `config.toml`
 - **Liked songs & play counts** — toggle a favorite with `l`/`f`; plays are counted and persisted to `~/.config/lavanda/db.json`
 - **Multi-selection** — `Ctrl+Click` to toggle, `Shift+Click` to range-select; context-menu actions apply to the whole selection
 - **Album art** — embedded cover tag displayed; falls back to `cover.jpg`, `Cover.jpg`, `folder.jpg` (and `.png`, `.webp` variants) in the same directory
@@ -143,6 +144,20 @@ The API key is generated in the Jellyfin admin panel under **Dashboard → API K
 - Read-only — metadata editing and liked-song sync require a local file
 - No gapless — a short gap occurs between tracks (inherent to streaming individual files)
 - No album art — embedded covers are not fetched from the server
+
+### Navidrome (Subsonic)
+
+To enable the Navidrome tab, add to `config.toml`:
+
+```toml
+navidrome_url      = "http://your-navidrome-server:4533"
+navidrome_user     = "your-username"
+navidrome_password = "your-password"
+```
+
+Works with any [Subsonic-compatible](http://www.subsonic.org/pages/api.jsp) server: Navidrome, Airsonic, Subsonic, Gonic, etc. The tab appears only when `navidrome_url` is set. Authentication uses hex-encoded password (`p=enc:...`) — no MD5 dependency.
+
+**Same limitations as Jellyfin:** read-only, no gapless, no album art from server.
 
 ---
 
@@ -289,6 +304,7 @@ src/
 ├── persist.rs          # library data store (db.json): likes, play counts, playlists, columns, radio
 ├── radio.rs            # radio-browser.info directory client + connectivity check
 ├── jellyfin.rs         # Jellyfin REST client (artists/albums/tracks/stream URL)
+├── navidrome.rs        # Subsonic API client for Navidrome and compatible servers
 ├── locale.rs           # i18n strings (en, pt_BR, es)
 ├── audio/
 │   ├── player.rs       # symphonia decode + cpal output (dedicated thread)

@@ -33,6 +33,7 @@ pub enum ViewMode {
     Genres,
     Radios,
     Jellyfin,
+    Navidrome,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -278,6 +279,15 @@ pub enum Message {
     JellyfinSelectAlbum(crate::jellyfin::JellyfinItem),
     JellyfinTracksLoaded(Result<Vec<Track>, String>),
     JellyfinSidebarSearchChanged(String),
+
+    // Navidrome
+    NavidromeConnect,
+    NavidromeArtistsLoaded(Result<Vec<crate::navidrome::NavidromeItem>, String>),
+    NavidromeSelectArtist(crate::navidrome::NavidromeItem),
+    NavidromeAlbumsLoaded(Result<Vec<crate::navidrome::NavidromeItem>, String>),
+    NavidromeSelectAlbum(crate::navidrome::NavidromeItem),
+    NavidromeTracksLoaded(Result<Vec<Track>, String>),
+    NavidromeSidebarSearchChanged(String),
 }
 
 // ── Estado global ─────────────────────────────────────────────────────────────
@@ -390,8 +400,20 @@ pub struct AppState {
     pub jf_selected_album: Option<crate::jellyfin::JellyfinItem>,
     pub jf_loading: bool,
     pub jf_error: Option<String>,
-    pub current_jf_item_id: Option<String>,
     pub jf_sidebar_search: String,
+
+    // Navidrome
+    pub nd_artists: Vec<crate::navidrome::NavidromeItem>,
+    pub nd_albums: Vec<crate::navidrome::NavidromeItem>,
+    pub nd_tracks: Vec<Track>,
+    pub nd_selected_artist: Option<crate::navidrome::NavidromeItem>,
+    pub nd_selected_album: Option<crate::navidrome::NavidromeItem>,
+    pub nd_loading: bool,
+    pub nd_error: Option<String>,
+    pub nd_sidebar_search: String,
+
+    // ID da faixa remota em reprodução (Jellyfin ou Navidrome)
+    pub current_remote_item_id: Option<String>,
 
     // Tema
     pub iced_theme: Theme,
@@ -507,8 +529,16 @@ impl AppState {
             jf_selected_album: None,
             jf_loading: false,
             jf_error: None,
-            current_jf_item_id: None,
             jf_sidebar_search: String::new(),
+            nd_artists: Vec::new(),
+            nd_albums: Vec::new(),
+            nd_tracks: Vec::new(),
+            nd_selected_artist: None,
+            nd_selected_album: None,
+            nd_loading: false,
+            nd_error: None,
+            nd_sidebar_search: String::new(),
+            current_remote_item_id: None,
             layout: Layout::Standard,
             spectrum: vec![0.0; crate::audio::spectrum::NUM_BARS],
             show_spectrum: true,
@@ -662,7 +692,7 @@ impl AppState {
                         self.tracks = Vec::new();
                     }
                 }
-                ViewMode::Radios | ViewMode::Jellyfin => {
+                ViewMode::Radios | ViewMode::Jellyfin | ViewMode::Navidrome => {
                     self.tracks = Vec::new();
                 }
             }
@@ -872,6 +902,12 @@ impl AppState {
                     ViewMode::Jellyfin => {
                         if self.jf_artists.is_empty() && !self.jf_loading {
                             return Task::done(Message::JellyfinConnect);
+                        }
+                        return Task::none();
+                    }
+                    ViewMode::Navidrome => {
+                        if self.nd_artists.is_empty() && !self.nd_loading {
+                            return Task::done(Message::NavidromeConnect);
                         }
                         return Task::none();
                     }
@@ -1143,6 +1179,8 @@ impl AppState {
                 self.selected_track = Some(track.clone());
                 if crate::jellyfin::is_jellyfin_path(&track.path) {
                     self.queue = self.jf_tracks.clone();
+                } else if crate::navidrome::is_navidrome_path(&track.path) {
+                    self.queue = self.nd_tracks.clone();
                 } else {
                     self.queue = self.tracks.clone();
                 }
@@ -1926,6 +1964,112 @@ impl AppState {
                 Task::none()
             }
 
+            // ── Navidrome ─────────────────────────────────────────────────────
+
+            Message::NavidromeConnect => {
+                let cfg = crate::config::get();
+                if cfg.navidrome_url.is_empty() {
+                    self.nd_error = Some("navidrome_url não configurado em config.toml".into());
+                    return Task::none();
+                }
+                self.nd_loading = true;
+                self.nd_error = None;
+                let url = cfg.navidrome_url.clone();
+                let user = cfg.navidrome_user.clone();
+                let pass = cfg.navidrome_password.clone();
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            crate::navidrome::fetch_artists(&url, &user, &pass)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                        .map_err(|e| e.to_string())
+                    },
+                    Message::NavidromeArtistsLoaded,
+                )
+            }
+
+            Message::NavidromeArtistsLoaded(result) => {
+                self.nd_loading = false;
+                match result {
+                    Ok(artists) => { self.nd_artists = artists; self.nd_error = None; }
+                    Err(e) => { self.nd_error = Some(e); }
+                }
+                Task::none()
+            }
+
+            Message::NavidromeSelectArtist(artist) => {
+                self.nd_selected_artist = Some(artist.clone());
+                self.nd_selected_album = None;
+                self.nd_tracks = Vec::new();
+                self.nd_loading = true;
+                self.nd_error = None;
+                let cfg = crate::config::get();
+                let url = cfg.navidrome_url.clone();
+                let user = cfg.navidrome_user.clone();
+                let pass = cfg.navidrome_password.clone();
+                let artist_id = artist.id.clone();
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            crate::navidrome::fetch_albums(&url, &user, &pass, &artist_id)
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                        .map_err(|e| e.to_string())
+                    },
+                    Message::NavidromeAlbumsLoaded,
+                )
+            }
+
+            Message::NavidromeAlbumsLoaded(result) => {
+                self.nd_loading = false;
+                match result {
+                    Ok(albums) => { self.nd_albums = albums; self.nd_error = None; }
+                    Err(e) => { self.nd_error = Some(e); }
+                }
+                Task::none()
+            }
+
+            Message::NavidromeSelectAlbum(album) => {
+                self.nd_selected_album = Some(album.clone());
+                self.nd_tracks = Vec::new();
+                self.nd_loading = true;
+                self.nd_error = None;
+                let cfg = crate::config::get();
+                let url = cfg.navidrome_url.clone();
+                let user = cfg.navidrome_user.clone();
+                let pass = cfg.navidrome_password.clone();
+                let album_id = album.id.clone();
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            crate::navidrome::fetch_tracks(&url, &user, &pass, &album_id)
+                                .map(|tracks| tracks.iter().map(|t| t.to_track()).collect::<Vec<_>>())
+                        })
+                        .await
+                        .unwrap_or_else(|e| Err(anyhow::anyhow!(e.to_string())))
+                        .map_err(|e| e.to_string())
+                    },
+                    Message::NavidromeTracksLoaded,
+                )
+            }
+
+            Message::NavidromeTracksLoaded(result) => {
+                self.nd_loading = false;
+                match result {
+                    Ok(tracks) => { self.nd_tracks = tracks; self.nd_error = None; }
+                    Err(e) => { self.nd_error = Some(e); }
+                }
+                Task::none()
+            }
+
+            Message::NavidromeSidebarSearchChanged(q) => {
+                self.nd_sidebar_search = q;
+                Task::none()
+            }
+
             // ── Open local folder ─────────────────────────────────────────────
 
             Message::OpenLocalFolder(path) => {
@@ -1984,8 +2128,8 @@ impl AppState {
                     }
                 }
                 AudioEvent::TrackEnded => {
-                    if self.current_jf_item_id.is_some() {
-                        // Avança a fila Jellyfin manualmente (sem gapless)
+                    if self.current_remote_item_id.is_some() {
+                        // Avança a fila remota manualmente (sem gapless)
                         let next = {
                             let cur_id = self.current_track.as_ref().map(|t| t.id);
                             let cur_pos = cur_id
@@ -1998,9 +2142,9 @@ impl AppState {
                             }
                         };
                         if let Some(track) = next {
-                            return self.play_jf_track(track);
+                            return self.play_track_internal(track);
                         }
-                        self.current_jf_item_id = None;
+                        self.current_remote_item_id = None;
                     }
                     self.playback_state = PlaybackState::Stopped;
                     self.position = Duration::ZERO;
@@ -2368,9 +2512,10 @@ impl AppState {
                 (format!("Album: {name}"), Some(album_btns), create)
             }
             ContextMenuTarget::Track(track) => {
-                let is_jf = crate::jellyfin::is_jellyfin_path(&track.path);
-                let extra: Element<Message> = if is_jf {
-                    // Faixas Jellyfin: sem edição local
+                let is_remote = crate::jellyfin::is_jellyfin_path(&track.path)
+                    || crate::navidrome::is_navidrome_path(&track.path);
+                let extra: Element<Message> = if is_remote {
+                    // Faixas remotas: sem edição local
                     Space::with_height(0).into()
                 } else {
                     let like_label = if track.liked { "Unlike this song" } else { "Like this song" };
@@ -2388,7 +2533,7 @@ impl AppState {
                     .spacing(4)
                     .into()
                 };
-                if !is_jf {
+                if !is_remote {
                     for pl in &custom_playlists {
                         playlist_section = playlist_section.push(
                             button(text(format!("  + {pl}")).size(12))
@@ -2397,7 +2542,7 @@ impl AppState {
                         );
                     }
                 }
-                let create: Element<Message> = if is_jf {
+                let create: Element<Message> = if is_remote {
                     Space::with_height(0).into()
                 } else {
                     button(text("+ Create playlist with song").size(12))
@@ -2547,23 +2692,35 @@ impl AppState {
     // ── Helpers de reprodução ─────────────────────────────────────────────────
 
     fn play_track_internal(&mut self, track: Track) -> Task<Message> {
-        if crate::jellyfin::is_jellyfin_path(&track.path) {
-            return self.play_jf_track(track);
+        let path_str = track.path.to_str().unwrap_or("").to_string();
+        if let Some(id) = path_str.strip_prefix("jellyfin://") {
+            let id = id.to_string();
+            let cfg = crate::config::get();
+            let url = crate::jellyfin::stream_url(&cfg.jellyfin_url, &id, &cfg.jellyfin_token);
+            return self.play_remote_track(track, id, url);
         }
-        self.current_jf_item_id = None;
+        if let Some(id) = path_str.strip_prefix("navidrome://") {
+            let id = id.to_string();
+            let cfg = crate::config::get();
+            let url = crate::navidrome::stream_url(
+                &cfg.navidrome_url,
+                &id,
+                &cfg.navidrome_user,
+                &cfg.navidrome_password,
+            );
+            return self.play_remote_track(track, id, url);
+        }
+        self.current_remote_item_id = None;
         self.audio.send(AudioCommand::Play(track.path.clone()));
         self.audio.send(AudioCommand::SetVolume(self.volume));
         self.set_now_playing(track)
     }
 
-    fn play_jf_track(&mut self, track: Track) -> Task<Message> {
-        let item_id = crate::jellyfin::item_id_from_path(&track.path)
-            .unwrap_or_default();
-        let cfg = crate::config::get();
-        let url = crate::jellyfin::stream_url(&cfg.jellyfin_url, &item_id, &cfg.jellyfin_token);
-        self.audio.send(AudioCommand::PlayStream { url, codec: String::new() });
+    fn play_remote_track(&mut self, track: Track, item_id: String, stream_url: String) -> Task<Message> {
+        self.audio.send(AudioCommand::PlayStream { url: stream_url, codec: String::new() });
         self.audio.send(AudioCommand::SetVolume(self.volume));
-        self.current_jf_item_id = Some(item_id);
+        self.audio.send(AudioCommand::SetNext(None));
+        self.current_remote_item_id = Some(item_id);
         self.current_station = None;
         self.stream_title = None;
         self.current_track = Some(track.clone());
@@ -2573,8 +2730,6 @@ impl AppState {
         self.duration = Duration::ZERO;
         self.notify_mpris_track(PlaybackStatus::Playing);
         send_track_notification(&track.title, &track.artist);
-        // Informa None ao audio thread — sem gapless para Jellyfin
-        self.audio.send(AudioCommand::SetNext(None));
         Task::none()
     }
 
@@ -2675,8 +2830,10 @@ impl AppState {
     /// Informa o audio thread qual será a próxima faixa (prefetch gapless).
     fn update_next(&self) {
         let next = self.peek_next().map(|t| t.path);
-        // Jellyfin tracks não suportam gapless: o audio thread não abre jellyfin://
-        let next = next.filter(|p| !crate::jellyfin::is_jellyfin_path(p));
+        // Faixas remotas não suportam gapless: o audio thread não abre essas URLs
+        let next = next.filter(|p| {
+            !crate::jellyfin::is_jellyfin_path(p) && !crate::navidrome::is_navidrome_path(p)
+        });
         self.audio.send(AudioCommand::SetNext(next));
     }
 
