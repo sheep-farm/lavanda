@@ -5,7 +5,13 @@
 [![Version](https://img.shields.io/badge/version-1.0.2--dev-blue.svg)](Cargo.toml)
 [![Wayland](https://img.shields.io/badge/Wayland-native-cyan.svg)](https://wayland.freedesktop.org)
 
-A native Wayland music player written in Rust, built for [Omarchy](https://omarchy.org/) / Hyprland rices. Follows the active Omarchy theme automatically — colors update live when you switch themes.
+**lavanda** is a minimalist music player for the Linux desktop, built for [Omarchy](https://omarchy.org/) / Hyprland rices and tiling window manager workflows.
+
+The guiding principle is restraint: every feature and every element on screen must earn its place. lavanda is not trying to be Spotify, Deezer, or YouTube Music. There are no recommendations, no discovery feeds, no social layers. lavanda exists for one purpose — to get out of the way and let you enjoy the music you already love.
+
+If you have a carefully curated local library and want a player that respects your attention and fits naturally into a tiling setup, lavanda is built for you.
+
+Follows the active Omarchy theme automatically — colors update live when you switch themes.
 
 ![lavanda — library view](assets/screenshot.png)
 
