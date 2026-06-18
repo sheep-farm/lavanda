@@ -260,7 +260,15 @@ fn build_sidebar_list(
             };
             let btn = button(label)
                 .on_press(msg)
-                .style(iced::widget::button::text)
+                .style(move |_, status| {
+                    let bg = match status {
+                        button::Status::Hovered if !is_selected => Some(
+                            iced::Background::Color(theme::with_alpha(theme::overlay0(), 0.13)),
+                        ),
+                        _ => None,
+                    };
+                    button::Style { background: bg, ..Default::default() }
+                })
                 .width(Length::Fill)
                 .padding([5, 10]);
 
@@ -933,11 +941,28 @@ fn build_track_row(
         .into_iter()
         .zip(widths.into_iter())
         .map(|(col, w)| -> Element<'static, Message> {
+            // Indicador de reprodução como widget separado — sem misturar com o texto do título.
+            if col == TableColumn::Title {
+                let icon_color = if is_current { theme::accent() } else { iced::Color::TRANSPARENT };
+                return row![
+                    text(icons::ICON_PLAY)
+                        .font(icons::NERD_FONT_MONO)
+                        .size(11)
+                        .color(icon_color),
+                    text(track.title.clone())
+                        .size(13)
+                        .color(base_color)
+                        .width(Length::Fill),
+                ]
+                .spacing(4)
+                .align_y(Alignment::Center)
+                .width(w)
+                .into();
+            }
+
             let cell_text = match col {
                 TableColumn::TrackNumber => track.track_number.map(|n| n.to_string()).unwrap_or_else(|| "·".to_string()),
-                TableColumn::Title => {
-                    if is_current { format!("▶ {}", track.title) } else { track.title.clone() }
-                }
+                TableColumn::Title => unreachable!(),
                 TableColumn::Artist => track.artist.clone(),
                 TableColumn::Album => track.album.clone(),
                 TableColumn::Genre => track.genre.clone(),
@@ -948,33 +973,34 @@ fn build_track_row(
                 TableColumn::DatePlayed => track.date_played.clone().unwrap_or_default(),
             };
             let cell_color = match col {
-                TableColumn::Title => base_color,
+                TableColumn::Title => unreachable!(),
                 TableColumn::Artist | TableColumn::Album | TableColumn::Genre if is_current => {
                     theme::with_alpha(theme::accent(), 0.8)
                 }
-                TableColumn::Artist | TableColumn::Album | TableColumn::Genre => theme::subtext(),
                 _ => theme::subtext(),
             };
             text(cell_text).size(13).color(cell_color).width(w).into()
         })
         .collect();
 
-    let like_icon: Element<'static, Message> = if liked || is_selected || is_current {
-        let like_msg = Message::ToggleLikeTrack(Track { cover_data: None, ..track.clone() });
-        button(
-            text(icons::ICON_HEART)
-                .font(icons::NERD_FONT_MONO)
-                .size(22)
-                .color(if liked { theme::red() } else { theme::with_alpha(theme::overlay0(), 0.5) }),
-        )
-        .on_press(like_msg)
-        .style(iced::widget::button::text)
-        .width(Length::Fixed(LIKE_COL_W))
-        .padding([0, 4])
-        .into()
+    // Coração sempre presente para evitar layout shift — apenas a cor varia.
+    let heart_color = if liked {
+        theme::red()
     } else {
-        Space::with_width(Length::Fixed(LIKE_COL_W)).into()
+        theme::with_alpha(theme::overlay0(), 0.22)
     };
+    let like_msg = Message::ToggleLikeTrack(Track { cover_data: None, ..track.clone() });
+    let like_icon: Element<'static, Message> = button(
+        text(icons::ICON_HEART)
+            .font(icons::NERD_FONT_MONO)
+            .size(22)
+            .color(heart_color),
+    )
+    .on_press(like_msg)
+    .style(iced::widget::button::text)
+    .width(Length::Fixed(LIKE_COL_W))
+    .padding([0, 4])
+    .into();
 
     let track_row_inner = row(cells)
         .push(like_icon)
@@ -1016,7 +1042,15 @@ fn build_track_row(
 
     let row_btn = button(row_styled)
         .on_press(select_msg)
-        .style(iced::widget::button::text)
+        .style(move |_, status| {
+            let bg = match status {
+                button::Status::Hovered if !is_selected && !is_current => Some(
+                    iced::Background::Color(theme::with_alpha(theme::overlay0(), 0.13)),
+                ),
+                _ => None,
+            };
+            button::Style { background: bg, ..Default::default() }
+        })
         .width(Length::Fill)
         .padding(0);
 
